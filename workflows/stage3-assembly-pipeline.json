@@ -1,0 +1,295 @@
+{
+  "name": "Physics Channel - Stage 3 - Assembly & YouTube Publish",
+  "nodes": [
+
+    {
+      "parameters": {},
+      "id": "s3-manual",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [240, 160]
+    },
+
+    {
+      "parameters": {
+        "jsCode": "const jobId = 'test-job-' + Date.now();\nreturn [{\n  json: {\n    body: {\n      job_id:               jobId,\n      manim_video_url:      'https://example.com/test-animation.mp4',\n      elevenlabs_audio_url: 'https://example.com/test-audio.mp3',\n      heygen_avatar_url:    'https://example.com/test-avatar.mp4',\n      youtube_title:        'Test Physics Video - Manual Run',\n      youtube_description:  'A test physics video generated manually.',\n      youtube_tags:         ['physics', 'test', 'education'],\n      youtube_channel_id:   'UCtest',\n      callback_url:         'http://localhost:5678/webhook/test-callback'\n    }\n  }\n}];"
+      },
+      "id": "s3-manual-data",
+      "name": "Stage 3 Test Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 160]
+    },
+
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "stage3-assemble",
+        "responseMode": "onReceived",
+        "responseData": "firstEntryJson",
+        "options": {}
+      },
+      "id": "s3-n01",
+      "name": "Stage 3 Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "webhookId": "physics-stage3-assemble"
+    },
+
+    {
+      "parameters": {
+        "jsCode": "const raw  = $input.first().json;\nconst body = (raw.body !== undefined) ? raw.body : raw;\n\nconst required = ['job_id','manim_video_url','elevenlabs_audio_url','youtube_title','youtube_description','youtube_tags','youtube_channel_id','callback_url'];\nfor (const f of required) { if (!body[f]) throw new Error('Stage 3 payload missing: ' + f); }\n\nconst jobId = body.job_id;\nreturn [{\n  json: {\n    job_id:               jobId,\n    manim_video_url:      body.manim_video_url,\n    elevenlabs_audio_url: body.elevenlabs_audio_url,\n    heygen_avatar_url:    body.heygen_avatar_url,\n    youtube_title:        body.youtube_title,\n    youtube_description:  body.youtube_description,\n    youtube_tags:         Array.isArray(body.youtube_tags) ? body.youtube_tags : body.youtube_tags.split(',').map(t => t.trim()),\n    youtube_channel_id:   body.youtube_channel_id,\n    callback_url:         body.callback_url,\n    start_time:           Date.now(),\n    anim_path:    `/ffmpeg/input/${jobId}_animation.mp4`,\n    audio_path:   `/ffmpeg/input/${jobId}_audio.mp3`,\n    avatar_path:  `/ffmpeg/input/${jobId}_avatar.mp4`,\n    music_path:   `/ffmpeg/config/background_music.mp3`,\n    output_path:  `/ffmpeg/output/${jobId}_final.mp4`,\n    output_n8n:   `/data/ffmpeg/output/${jobId}_final.mp4`,\n    output_filename: `${jobId}_final.mp4`\n  }\n}];"
+      },
+      "id": "s3-n02",
+      "name": "Extract Stage 3 Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+
+    {
+      "parameters": {
+        "jsCode": "const { execSync } = require('child_process');\nconst data = $input.first().json;\n\nconst script =\n  'curl -L --retry 5 --retry-delay 10 --retry-max-time 600 --max-time 600 --connect-timeout 30' +\n  ' -o \"' + data.anim_path + '\" \"' + data.manim_video_url + '\" 2>&1\\n' +\n  'EXIT=$?\\n' +\n  'if [ $EXIT -eq 0 ] && [ -s \"' + data.anim_path + '\" ]; then\\n' +\n  '  echo \"DOWNLOAD_OK:' + data.anim_path + '\"\\n' +\n  'else\\n' +\n  '  echo \"DOWNLOAD_FAIL:animation:exit_$EXIT\"\\n' +\n  'fi';\n\nlet stdout = '';\ntry {\n  stdout = execSync('docker exec -i ffmpeg-runner bash', { input: script, encoding: 'utf-8', timeout: 620000 });\n} catch (err) {\n  stdout = err.stdout || err.message || 'DOWNLOAD_FAIL:animation:exception';\n}\n\nreturn [{ json: { ...data, stdout } }];"
+      },
+      "id": "s3-n03",
+      "name": "Download Manim Animation",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, 160]
+    },
+
+    {
+      "parameters": {
+        "jsCode": "const { execSync } = require('child_process');\nconst data = $input.first().json;\n\nconst script =\n  'curl -L --retry 5 --retry-delay 10 --retry-max-time 300 --max-time 300 --connect-timeout 30' +\n  ' -o \"' + data.audio_path + '\" \"' + data.elevenlabs_audio_url + '\" 2>&1\\n' +\n  'EXIT=$?\\n' +\n  'if [ $EXIT -eq 0 ] && [ -s \"' + data.audio_path + '\" ]; then\\n' +\n  '  echo \"DOWNLOAD_OK:' + data.audio_path + '\"\\n' +\n  'else\\n' +\n  '  echo \"DOWNLOAD_FAIL:audio:exit_$EXIT\"\\n' +\n  'fi';\n\nlet stdout = '';\ntry {\n  stdout = execSync('docker exec -i ffmpeg-runner bash', { input: script, encoding: 'utf-8', timeout: 320000 });\n} catch (err) {\n  stdout = err.stdout || err.message || 'DOWNLOAD_FAIL:audio:exception';\n}\n\nreturn [{ json: { ...data, stdout } }];"
+      },
+      "id": "s3-n04",
+      "name": "Download ElevenLabs Audio",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, 320]
+    },
+
+    {
+      "parameters": {
+        "jsCode": "// HeyGen disabled — stub node (disconnected)\nreturn [{ json: $input.first().json }];"
+      },
+      "id": "s3-n05",
+      "name": "Download HeyGen Avatar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, 480]
+    },
+
+    {
+      "parameters": {
+        "jsCode": "// ── Verify downloads succeeded (HeyGen disabled) ─────────────\nconst anim   = $('Download Manim Animation').first().json;\nconst audio  = $('Download ElevenLabs Audio').first().json;\nconst data   = $('Extract Stage 3 Payload').first().json;\n\nconst failures = [\n  (anim.stdout  || '').includes('DOWNLOAD_FAIL') ? ('Animation: ' + (anim.stdout||'').split('\\n').filter(l=>l.includes('FAIL'))[0]) : null,\n  (audio.stdout || '').includes('DOWNLOAD_FAIL') ? ('Audio: '     + (audio.stdout||'').split('\\n').filter(l=>l.includes('FAIL'))[0]) : null\n].filter(Boolean);\n\nif (failures.length > 0) {\n  throw new Error('Asset download(s) failed:\\n' + failures.join('\\n'));\n}\n\nreturn [{ json: data }];"
+      },
+      "id": "s3-n06",
+      "name": "Verify Downloads",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [960, 320]
+    },
+
+    {
+      "parameters": {
+        "jsCode": "const { execSync } = require('child_process');\nconst data = $input.first().json;\n\nconst fc = '[0:v]scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30[outv];[1:a]volume=1.0[narr];[2:a]volume=0.15,aloop=loop=-1:size=2e+09[bgm];[narr][bgm]amix=inputs=2:duration=first:dropout_transition=2[outa]';\n\nconst script =\n  'timeout 1800 ffmpeg -y' +\n  ' -i \"' + data.anim_path + '\"' +\n  ' -i \"' + data.audio_path + '\"' +\n  ' -i \"' + data.music_path + '\"' +\n  ' -filter_complex \"' + fc + '\"' +\n  ' -map \"[outv]\" -map \"[outa]\"' +\n  ' -c:v libx264 -preset medium -crf 18' +\n  ' -c:a aac -b:a 192k' +\n  ' -movflags +faststart -pix_fmt yuv420p -r 30' +\n  ' \"' + data.output_path + '\" 2>&1\\n' +\n  'EXIT=$?\\n' +\n  'if [ $EXIT -eq 0 ] && [ -s \"' + data.output_path + '\" ]; then\\n' +\n  '  SIZE=$(du -sh \"' + data.output_path + '\" | cut -f1)\\n' +\n  '  echo \"FFMPEG_SUCCESS:' + data.output_path + ':size_$SIZE\"\\n' +\n  'else\\n' +\n  '  echo \"FFMPEG_FAILED:exit_$EXIT\"\\n' +\n  'fi';\n\nlet stdout = '';\ntry {\n  stdout = execSync('docker exec -i ffmpeg-runner bash', { input: script, encoding: 'utf-8', timeout: 1820000 });\n} catch (err) {\n  stdout = err.stdout || err.message || 'FFMPEG_FAILED:exception';\n}\n\nreturn [{ json: { ...data, stdout } }];"
+      },
+      "id": "s3-n07",
+      "name": "FFmpeg Assemble Final Video",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1200, 320]
+    },
+
+    {
+      "parameters": {
+        "jsCode": "const item   = $input.first().json;\nconst stdout = (item.stdout || '').trim();\nconst data   = $('Extract Stage 3 Payload').first().json;\n\nif (stdout.includes('FFMPEG_FAILED')) {\n  const tail = stdout.split('\\n').slice(-25).join('\\n');\n  throw new Error('FFmpeg assembly failed.\\n\\nLast output:\\n' + tail);\n}\nif (!stdout.includes('FFMPEG_SUCCESS')) {\n  console.warn('FFMPEG_SUCCESS signal not found. Proceeding cautiously. stdout: ' + stdout.slice(-300));\n}\n\nreturn [{ json: data }];"
+      },
+      "id": "s3-n08",
+      "name": "Verify FFmpeg Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1440, 320]
+    },
+
+    {
+      "parameters": {
+        "operation": "read",
+        "fileSelector": "={{ $json.output_n8n }}",
+        "options": {}
+      },
+      "id": "s3-n09",
+      "name": "Read Final Video",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [1660, 320]
+    },
+
+    {
+      "parameters": {
+        "title": "={{ $json.youtube_title }}",
+        "categoryId": "27",
+        "description": "={{ $json.youtube_description }}",
+        "options": {
+          "tags": { "tag": "={{ $json.youtube_tags }}" },
+          "privacyStatus": "public",
+          "embeddable": true,
+          "publicStatsViewable": true,
+          "notifySubscribers": true
+        }
+      },
+      "id": "s3-n10",
+      "name": "Upload to YouTube",
+      "type": "n8n-nodes-base.youTube",
+      "typeVersion": 1,
+      "position": [1880, 320],
+      "credentials": {
+        "youTubeOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_YOUTUBE_CRED_ID",
+          "name": "YouTube OAuth2"
+        }
+      }
+    },
+
+    {
+      "parameters": {
+        "jsCode": "// ── Verify YouTube upload returned a video ID ─────────────────\nconst ytItem = $input.first().json;\nif (!ytItem.id) {\n  throw new Error('YouTube upload did not return a video ID. Response: ' + JSON.stringify(ytItem).slice(0, 300));\n}\n// Pass through both yt data AND original payload data\nconst payload = $('Extract Stage 3 Payload').first().json;\nreturn [{ json: { ...payload, yt_video_id: ytItem.id } }];"
+      },
+      "id": "s3-n10b",
+      "name": "Verify YouTube Upload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2100, 320]
+    },
+
+    {
+      "parameters": {
+        "operation": "upload",
+        "name": "={{ $json.output_filename }}",
+        "driveId": {
+          "__rl": true,
+          "value": "MyDrive",
+          "mode": "list",
+          "cachedResultName": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "={{ $env.GOOGLE_DRIVE_FOLDER_ID }}",
+          "mode": "id"
+        },
+        "options": { "simplifyOutput": false }
+      },
+      "id": "s3-n11",
+      "name": "Upload Final Video to Drive",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [2320, 320],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "QUGEpurbhr31d8QZ",
+          "name": "Google Drive account 3"
+        }
+      }
+    },
+
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://www.googleapis.com/drive/v3/files/' + $json.id + '/permissions' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleDriveOAuth2Api",
+        "sendBody": true,
+        "contentType": "json",
+        "bodyParameters": {
+          "parameters": [
+            { "name": "type", "value": "anyone" },
+            { "name": "role", "value": "reader" }
+          ]
+        },
+        "options": { "timeout": 30000 }
+      },
+      "id": "s3-n12",
+      "name": "Make Final Video Public",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [2540, 320],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "QUGEpurbhr31d8QZ",
+          "name": "Google Drive account 3"
+        }
+      }
+    },
+
+    {
+      "parameters": {
+        "jsCode": "const driveNode = $('Upload Final Video to Drive').first().json;\nconst ytVerify  = $('Verify YouTube Upload').first().json;\nconst payload   = $('Extract Stage 3 Payload').first().json;\n\nconst driveFileId    = driveNode.id;\nconst ytVideoId      = ytVerify.yt_video_id;\nconst youtubeUrl     = `https://www.youtube.com/watch?v=${ytVideoId}`;\nconst finalVideoUrl  = `https://drive.google.com/uc?export=download&id=${driveFileId}`;\nconst totalTimeSec   = Math.round((Date.now() - payload.start_time) / 1000);\n\nreturn [{\n  json: {\n    job_id:                payload.job_id,\n    callback_url:          payload.callback_url,\n    youtube_url:           youtubeUrl,\n    youtube_video_id:      ytVideoId,\n    final_video_url:       finalVideoUrl,\n    drive_file_id:         driveFileId,\n    assembly_time_seconds: totalTimeSec\n  }\n}];"
+      },
+      "id": "s3-n13",
+      "name": "Build Publish Callback",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2760, 320]
+    },
+
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.callback_url }}",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "job_id",          "value": "={{ $json.job_id }}" },
+            { "name": "youtube_url",     "value": "={{ $json.youtube_url }}" },
+            { "name": "final_video_url", "value": "={{ $json.final_video_url }}" }
+          ]
+        },
+        "options": {
+          "timeout": 60000,
+          "retry": {
+            "enabled": true,
+            "maxTries": 5,
+            "waitBetweenTries": 10000
+          }
+        }
+      },
+      "id": "s3-n14",
+      "name": "Send Publish Callback",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [2980, 320]
+    }
+
+  ],
+
+  "connections": {
+    "Manual Trigger":        { "main": [[ { "node": "Stage 3 Test Data",          "type": "main", "index": 0 } ]] },
+    "Stage 3 Test Data":     { "main": [[ { "node": "Extract Stage 3 Payload",    "type": "main", "index": 0 } ]] },
+    "Stage 3 Webhook":       { "main": [[ { "node": "Extract Stage 3 Payload",    "type": "main", "index": 0 } ]] },
+    "Extract Stage 3 Payload": {
+      "main": [
+        [ { "node": "Download Manim Animation",  "type": "main", "index": 0 } ],
+        [ { "node": "Download ElevenLabs Audio", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Download Manim Animation":  { "main": [[ { "node": "Verify Downloads", "type": "main", "index": 0 } ]] },
+    "Download ElevenLabs Audio": { "main": [[ { "node": "Verify Downloads", "type": "main", "index": 0 } ]] },
+    "Verify Downloads":          { "main": [[ { "node": "FFmpeg Assemble Final Video", "type": "main", "index": 0 } ]] },
+    "FFmpeg Assemble Final Video": { "main": [[ { "node": "Verify FFmpeg Output",    "type": "main", "index": 0 } ]] },
+    "Verify FFmpeg Output":      { "main": [[ { "node": "Read Final Video",           "type": "main", "index": 0 } ]] },
+    "Read Final Video":          { "main": [[ { "node": "Upload to YouTube",          "type": "main", "index": 0 } ]] },
+    "Upload to YouTube":         { "main": [[ { "node": "Verify YouTube Upload",      "type": "main", "index": 0 } ]] },
+    "Verify YouTube Upload":     { "main": [[ { "node": "Upload Final Video to Drive","type": "main", "index": 0 } ]] },
+    "Upload Final Video to Drive": { "main": [[ { "node": "Make Final Video Public",  "type": "main", "index": 0 } ]] },
+    "Make Final Video Public":   { "main": [[ { "node": "Build Publish Callback",     "type": "main", "index": 0 } ]] },
+    "Build Publish Callback":    { "main": [[ { "node": "Send Publish Callback",      "type": "main", "index": 0 } ]] }
+  },
+
+  "active": true,
+  "settings": { "executionOrder": "v1", "saveManualExecutions": true },
+  "id": "physics-stage3-pipeline",
+  "tags": [ { "name": "physics-channel" }, { "name": "stage3" } ]
+}

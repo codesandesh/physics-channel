@@ -1,0 +1,37 @@
+# ── Secrets ──────────────────────────────────────────────────
+.env
+
+# ── Large media / generated files ────────────────────────────
+*.mp4
+*.mp3
+*.wav
+*.aac
+*.m4a
+*.webm
+*.png
+*.jpg
+*.jpeg
+*.gif
+
+# ── Runtime data (container-generated) ───────────────────────
+n8n/
+manim/scripts/*.py
+manim/renders/
+manim/combined/
+ffmpeg/input/
+ffmpeg/output/
+uploads/
+logs/
+stage2_payload.json
+
+# ── OS noise ─────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+__pycache__/
+
+# ── Docker Desktop WSL disk images (huge) ─────────────────────
+DockerDesktopWSL/
+*.vhdx
+
+# ── Docker build cache ────────────────────────────────────────
+*.log

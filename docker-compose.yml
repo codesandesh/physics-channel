@@ -1,0 +1,154 @@
+version: "3.8"
+
+networks:
+  pipeline-network:
+    driver: bridge
+
+services:
+
+  # ─────────────────────────────────────────────────────────────
+  # postgres  –  persistent database for n8n
+  # ─────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    container_name: postgres
+    restart: always
+    networks:
+      - pipeline-network
+    env_file:
+      - .env
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─────────────────────────────────────────────────────────────
+  # n8n  –  automation engine / pipeline brain
+  # Custom image adds Docker CLI so Execute Command nodes can
+  # run:  docker exec manim-runner manim ...
+  #       docker exec ffmpeg-runner ffmpeg ...
+  # ─────────────────────────────────────────────────────────────
+  n8n:
+    build:
+      context: ./n8n
+      dockerfile: Dockerfile
+    container_name: n8n
+    restart: always
+    user: root
+    ports:
+      - "5678:5678"
+    networks:
+      - pipeline-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD}
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+      - N8N_HOST=${N8N_HOST}
+      - N8N_PORT=${N8N_PORT}
+      - N8N_PROTOCOL=http
+      - WEBHOOK_URL=${N8N_WEBHOOK_BASE_URL}
+      - GENERIC_TIMEZONE=UTC
+      - TZ=UTC
+      - N8N_BLOCK_ENV_ACCESS_IN_JS=false
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
+      - NODE_FUNCTION_ALLOW_BUILTIN=child_process,fs,path,os,https,http
+      - N8N_RUNNERS_HEARTBEAT_INTERVAL=600
+      - N8N_FILES_ALLOWED_PATHS=/data/manim/combined,/data/manim/renders,/data/manim/scripts,/data/ffmpeg/output,/data/uploads
+      - N8N_USER_FOLDER=/home/node/.n8n
+      # PostgreSQL connection
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=postgres
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_DATABASE=${POSTGRES_DB}
+      - DB_POSTGRESDB_USER=${POSTGRES_USER}
+      - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD}
+      # Expose env vars to n8n workflows
+      - GOOGLE_DRIVE_FOLDER_ID=${GOOGLE_DRIVE_FOLDER_ID}
+      - SERVER_BASE_URL=${SERVER_BASE_URL}
+      - APPS_SCRIPT_CALLBACK_URL=${APPS_SCRIPT_CALLBACK_URL}
+      # Stage 1 — AI service API keys
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GOOGLE_AI_API_KEY=${GOOGLE_AI_API_KEY}
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY}
+      - ELEVENLABS_VOICE_ID=${ELEVENLABS_VOICE_ID}
+      - HEYGEN_API_KEY=${HEYGEN_API_KEY}
+      - HEYGEN_AVATAR_ID=${HEYGEN_AVATAR_ID}
+      - YOUTUBE_CHANNEL_ID=${YOUTUBE_CHANNEL_ID}
+    volumes:
+      # n8n data (workflows, credentials, execution history)
+      - ./n8n:/home/node/.n8n
+      # Docker socket – lets n8n exec into other containers
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Shared volumes so n8n can read/write files for manim and ffmpeg
+      - ./manim/scripts:/data/manim/scripts
+      - ./manim/renders:/data/manim/renders
+      - ./manim/combined:/data/manim/combined
+      - ./ffmpeg/input:/data/ffmpeg/input
+      - ./ffmpeg/output:/data/ffmpeg/output
+      - ./uploads:/data/uploads
+      - ./config:/data/config
+
+  # ─────────────────────────────────────────────────────────────
+  # manim-runner  –  Python 3.11 + Manim Community Edition
+  # n8n writes .py files to the shared scripts volume,
+  # then execs into this container to run manim rendering.
+  # ─────────────────────────────────────────────────────────────
+  manim-runner:
+    build:
+      context: ./manim
+      dockerfile: Dockerfile
+    container_name: manim-runner
+    restart: always
+    networks:
+      - pipeline-network
+    env_file:
+      - .env
+    environment:
+      - MANIM_SCRIPTS_DIR=${MANIM_SCRIPTS_DIR}
+      - MANIM_RENDERS_DIR=${MANIM_RENDERS_DIR}
+    volumes:
+      - ./manim/scripts:/manim/scripts
+      - ./manim/renders:/manim/renders
+      - ./manim/combined:/manim/combined
+    command: tail -f /dev/null
+
+  # ─────────────────────────────────────────────────────────────
+  # ffmpeg-runner  –  Ubuntu 22.04 + FFmpeg + curl/wget
+  # n8n execs into this container to download assets and
+  # assemble the final video with FFmpeg.
+  # ─────────────────────────────────────────────────────────────
+  ffmpeg-runner:
+    build:
+      context: ./ffmpeg
+      dockerfile: Dockerfile
+    container_name: ffmpeg-runner
+    restart: always
+    networks:
+      - pipeline-network
+    env_file:
+      - .env
+    environment:
+      - FFMPEG_INPUT_DIR=${FFMPEG_INPUT_DIR}
+      - FFMPEG_OUTPUT_DIR=${FFMPEG_OUTPUT_DIR}
+    volumes:
+      - ./ffmpeg/input:/ffmpeg/input
+      - ./ffmpeg/output:/ffmpeg/output
+      - ./uploads:/ffmpeg/uploads
+      - ./config:/ffmpeg/config
+    command: tail -f /dev/null
+
+volumes:
+  postgres_data:
