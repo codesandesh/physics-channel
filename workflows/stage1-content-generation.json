@@ -32,7 +32,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const raw  = $input.first().json;\nconst body = (raw.body !== undefined) ? raw.body : raw;\n\n// Topic comes from either:\n// 1. Webhook path (Apps Script sends it): body.topic\n// 2. Manual Trigger path (from Google Sheet): raw.topic (via Pick PENDING Topic node)\nconst jobId = body.job_id || raw.job_id || ('PHY-' + Date.now().toString().slice(-8));\nconst topic = body.topic || raw.topic;\n\nif (!topic) throw new Error('No topic found. For manual trigger: make sure your Google Sheet Dashboard tab has a row with STATUS=PENDING and a topic in column B.');\n\nreturn [{\n  json: {\n    job_id:   jobId,\n    topic:    topic,\n    start_time: Date.now()\n  }\n}];"
+        "jsCode": "const raw=$input.first().json;\nconst body=(raw.body!==undefined)?raw.body:raw;\nconst jobId=body.job_id||raw.job_id||(\"PHY-\"+Date.now().toString().slice(-8));\nconst topic=body.topic||raw.topic;\nconst sheetRow=body.sheet_row||raw.sheet_row||null;\nif(!topic)throw new Error(\"No topic found. Add a PENDING row in Google Sheet Dashboard (col B=topic, col E=PENDING).\");\nreturn[{json:{job_id:jobId,topic:topic,sheet_row:sheetRow,start_time:Date.now()}}];"
       },
       "id": "s1-n02",
       "name": "Set Job Config",
@@ -168,7 +168,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const data = $input.first().json;\n\nreturn [{\n  json: {\n    job_id:      data.job_id,\n    scenes:      data.scenes,\n    scene_count: data.scenes.length,\n    start_time:  data.start_time\n  }\n}];"
+        "jsCode": "const data=$input.first().json;\nconst cfg=$(\"Set Job Config\").first().json;\nreturn[{json:{job_id:data.job_id,scenes:data.scenes,scene_count:data.scenes.length,start_time:data.start_time,sheet_row:cfg.sheet_row||null}}];"
       },
       "id": "s1-n10",
       "name": "Build Stage 2 Payload",
@@ -207,7 +207,9 @@
     {
       "parameters": {
         "method": "GET",
-        "url": "={{ 'https://sheets.googleapis.com/v4/spreadsheets/17sx-y_QDWYHFPR4sfpx9pPd8YHFx-aX8jh8tLtZXELQ/values/%F0%9F%8E%AC%20Dashboard!A2:O?key=' + $env.GOOGLE_AI_API_KEY }}",
+        "url": "https://sheets.googleapis.com/v4/spreadsheets/17sx-y_QDWYHFPR4sfpx9pPd8YHFx-aX8jh8tLtZXELQ/values/%F0%9F%8E%AC%20Dashboard!A4:O",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleDriveOAuth2Api",
         "options": {
           "timeout": 10000
         }
@@ -219,11 +221,17 @@
       "position": [
         460,
         160
-      ]
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "QUGEpurbhr31d8QZ",
+          "name": "Google Drive account 3"
+        }
+      }
     },
     {
       "parameters": {
-        "jsCode": "const res  = $input.first().json;\nconst rows = res.values || [];\n\n// Dashboard columns: A=JOB_ID, B=TOPIC, C=DIFFICULTY, D=DURATION_MIN, E=STATUS\nconst row = rows.find(r => r[4] && r[4].toString().toUpperCase().trim() === 'PENDING');\n\nif (!row) {\n  throw new Error(\n    'No PENDING topic found in Google Sheet Dashboard tab.\\n' +\n    'Fix: open your Google Sheet → Dashboard tab → set STATUS (col E) = PENDING for a topic row.'\n  );\n}\n\nconst topic = (row[1] || '').trim();\nif (!topic) throw new Error('PENDING row found but Topic (column B) is empty. Add the topic name.');\n\nconst jobId = (row[0] || '').trim() || ('PHY-' + Date.now().toString().slice(-8));\n\nconsole.log('Got topic from sheet: ' + topic + ' (job: ' + jobId + ')');\n\nreturn [{ json: { job_id: jobId, topic: topic, source: 'google_sheet' } }];"
+        "jsCode": "const res=$input.first().json;\nconst rows=res.values||[];\nlet found=null;\nfor(let i=0;i<rows.length;i++){\n  const s=(rows[i][4]||\"\" ).toString().toUpperCase().trim();\n  if(s===\"PENDING\"){found={idx:i,row:rows[i]};break;}\n}\nif(!found)throw new Error(\"No PENDING topic found in Dashboard tab.\nOpen your Google Sheet -> Dashboard -> set STATUS (col E) = PENDING for a row.\");\nconst sheetRow=found.idx+4;\nconst topic=(found.row[1]||\"\").trim();\nif(!topic)throw new Error(\"PENDING row found but Topic (col B) is empty.\");\nconst jobId=(found.row[0]||\"\").trim()||\"PHY-\"+Date.now().toString().slice(-8);\nconsole.log(\"Sheet row \"+sheetRow+\" | \"+jobId+\" | \"+topic);\nreturn[{json:{job_id:jobId,topic:topic,sheet_row:sheetRow,source:\"google_sheet\"}}];"
       },
       "id": "s1-sheet02",
       "name": "Pick PENDING Topic",
@@ -236,43 +244,61 @@
     },
     {
       "parameters": {
-        "method": "POST",
-        "url": "={{ $env.APPS_SCRIPT_CALLBACK_URL }}",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [{ "name": "Content-Type", "value": "application/json" }]
-        },
+        "method": "PUT",
+        "url": "={{ 'https://sheets.googleapis.com/v4/spreadsheets/17sx-y_QDWYHFPR4sfpx9pPd8YHFx-aX8jh8tLtZXELQ/values/%F0%9F%8E%AC%20Dashboard!E' + $json.sheet_row + '?valueInputOption=USER_ENTERED' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleDriveOAuth2Api",
         "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ action: 'mark_in_progress', job_id: $json.job_id }) }}",
-        "options": { "timeout": 10000 }
+        "contentType": "json",
+        "body": "={{ JSON.stringify({range:\"Ἲc Dashboard!E\"+$json.sheet_row,majorDimension:\"ROWS\",values:[[\"IN_PROGRESS\"]]}) }}",
+        "options": {
+          "timeout": 10000
+        }
       },
       "id": "s1-sheet03",
       "name": "Mark IN_PROGRESS in Sheet",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "continueOnFail": true,
-      "position": [ 900, 160 ]
+      "position": [
+        900,
+        160
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "QUGEpurbhr31d8QZ",
+          "name": "Google Drive account 3"
+        }
+      }
     },
     {
       "parameters": {
-        "method": "POST",
-        "url": "={{ $env.APPS_SCRIPT_CALLBACK_URL }}",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [{ "name": "Content-Type", "value": "application/json" }]
-        },
+        "method": "PUT",
+        "url": "={{ 'https://sheets.googleapis.com/v4/spreadsheets/17sx-y_QDWYHFPR4sfpx9pPd8YHFx-aX8jh8tLtZXELQ/values/%F0%9F%8E%AC%20Dashboard!E' + $('Set Job Config').first().json.sheet_row + '?valueInputOption=USER_ENTERED' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleDriveOAuth2Api",
         "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ action: 'stage1_done', job_id: $('Set Job Config').first().json.job_id, topic: $('Set Job Config').first().json.topic, scene_count: $json.scene_count }) }}",
-        "options": { "timeout": 15000 }
+        "contentType": "json",
+        "body": "={{ JSON.stringify({range:\"Dashboard!E\"+$(\"Set Job Config\").first().json.sheet_row,majorDimension:\"ROWS\",values:[[\"STAGE2\"]]}) }}",
+        "options": {
+          "timeout": 10000
+        }
       },
       "id": "s1-notify01",
       "name": "Notify Stage1 Done",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "continueOnFail": true,
-      "position": [ 2660, 300 ]
+      "position": [
+        2660,
+        300
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "QUGEpurbhr31d8QZ",
+          "name": "Google Drive account 3"
+        }
+      }
     }
   ],
   "connections": {
