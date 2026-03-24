@@ -32,7 +32,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const raw  = $input.first().json;\nconst body = (raw.body !== undefined) ? raw.body : raw;\n\nconst jobId = body.job_id || ('PHY-' + Date.now().toString().slice(-8));\nconst topic = body.topic || \"Newton's Laws of Motion\";\n\nreturn [{\n  json: {\n    job_id:   jobId,\n    topic:    topic,\n    start_time: Date.now()\n  }\n}];"
+        "jsCode": "const raw  = $input.first().json;\nconst body = (raw.body !== undefined) ? raw.body : raw;\n\n// Topic comes from either:\n// 1. Webhook path (Apps Script sends it): body.topic\n// 2. Manual Trigger path (from Google Sheet): raw.topic (via Pick PENDING Topic node)\nconst jobId = body.job_id || raw.job_id || ('PHY-' + Date.now().toString().slice(-8));\nconst topic = body.topic || raw.topic;\n\nif (!topic) throw new Error('No topic found. For manual trigger: make sure your Google Sheet Dashboard tab has a row with STATUS=PENDING and a topic in column B.');\n\nreturn [{\n  json: {\n    job_id:   jobId,\n    topic:    topic,\n    start_time: Date.now()\n  }\n}];"
       },
       "id": "s1-n02",
       "name": "Set Job Config",
@@ -203,10 +203,113 @@
         2440,
         300
       ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://sheets.googleapis.com/v4/spreadsheets/17sx-y_QDWYHFPR4sfpx9pPd8YHFx-aX8jh8tLtZXELQ/values/%F0%9F%8E%AC%20Dashboard!A2:O?key=' + $env.GOOGLE_AI_API_KEY }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "s1-sheet01",
+      "name": "Read Topic From Sheet",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        460,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const res  = $input.first().json;\nconst rows = res.values || [];\n\n// Dashboard columns: A=JOB_ID, B=TOPIC, C=DIFFICULTY, D=DURATION_MIN, E=STATUS\nconst row = rows.find(r => r[4] && r[4].toString().toUpperCase().trim() === 'PENDING');\n\nif (!row) {\n  throw new Error(\n    'No PENDING topic found in Google Sheet Dashboard tab.\\n' +\n    'Fix: open your Google Sheet → Dashboard tab → set STATUS (col E) = PENDING for a topic row.'\n  );\n}\n\nconst topic = (row[1] || '').trim();\nif (!topic) throw new Error('PENDING row found but Topic (column B) is empty. Add the topic name.');\n\nconst jobId = (row[0] || '').trim() || ('PHY-' + Date.now().toString().slice(-8));\n\nconsole.log('Got topic from sheet: ' + topic + ' (job: ' + jobId + ')');\n\nreturn [{ json: { job_id: jobId, topic: topic, source: 'google_sheet' } }];"
+      },
+      "id": "s1-sheet02",
+      "name": "Pick PENDING Topic",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.APPS_SCRIPT_CALLBACK_URL }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Content-Type", "value": "application/json" }]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ action: 'mark_in_progress', job_id: $json.job_id }) }}",
+        "options": { "timeout": 10000 }
+      },
+      "id": "s1-sheet03",
+      "name": "Mark IN_PROGRESS in Sheet",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "continueOnFail": true,
+      "position": [ 900, 160 ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.APPS_SCRIPT_CALLBACK_URL }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Content-Type", "value": "application/json" }]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ action: 'stage1_done', job_id: $('Set Job Config').first().json.job_id, topic: $('Set Job Config').first().json.topic, scene_count: $json.scene_count }) }}",
+        "options": { "timeout": 15000 }
+      },
+      "id": "s1-notify01",
+      "name": "Notify Stage1 Done",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "continueOnFail": true,
+      "position": [ 2660, 300 ]
     }
   ],
   "connections": {
     "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Read Topic From Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Topic From Sheet": {
+      "main": [
+        [
+          {
+            "node": "Pick PENDING Topic",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pick PENDING Topic": {
+      "main": [
+        [
+          {
+            "node": "Mark IN_PROGRESS in Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark IN_PROGRESS in Sheet": {
       "main": [
         [
           {
@@ -321,6 +424,17 @@
         [
           {
             "node": "POST to Stage 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST to Stage 2": {
+      "main": [
+        [
+          {
+            "node": "Notify Stage1 Done",
             "type": "main",
             "index": 0
           }

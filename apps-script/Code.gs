@@ -863,6 +863,17 @@ function doPost(e) {
         .setMimeType(ContentService.MimeType.TEXT);
     }
 
+    if (action === "mark_in_progress") {
+      _updateDashboard(body.job_id, {
+        [DASH_COL.STATUS]       : "IN_PROGRESS",
+        [DASH_COL.STAGE1_STATUS]: "RUNNING",
+        [DASH_COL.CREATED_AT]   : new Date().toISOString()
+      });
+      _log(body.job_id, "STAGE1", "INFO", "Job picked — marked IN_PROGRESS");
+      return ContentService.createTextOutput("OK — marked in_progress")
+        .setMimeType(ContentService.MimeType.TEXT);
+    }
+
     if (action === "stage1_done") {
       _handleStage1Done(body);
       return ContentService.createTextOutput("OK — stage1_done processed")
