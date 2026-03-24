@@ -32,7 +32,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const raw=$input.first().json;\nconst body=(raw.body!==undefined)?raw.body:raw;\nconst jobId=body.job_id||raw.job_id||(\"PHY-\"+Date.now().toString().slice(-8));\nconst topic=body.topic||raw.topic;\nconst sheetRow=body.sheet_row||raw.sheet_row||null;\nif(!topic)throw new Error(\"No topic found. Add a PENDING row in Google Sheet Dashboard (col B=topic, col E=PENDING).\");\nreturn[{json:{job_id:jobId,topic:topic,sheet_row:sheetRow,start_time:Date.now()}}];"
+        "jsCode": "const raw  = $input.first().json;\nconst body = (raw.body !== undefined) ? raw.body : raw;\n\nlet sheetData = {};\ntry { sheetData = $('Pick PENDING Topic').first().json; } catch(e) {}\n\nconst jobId      = body.job_id      || raw.job_id      || sheetData.job_id      || ('PHY-' + Date.now().toString().slice(-8));\nconst topic      = body.topic       || raw.topic       || sheetData.topic;\nconst sheetRow   = body.sheet_row   || raw.sheet_row   || sheetData.sheet_row   || null;\nconst durationMin = body.duration_min || raw.duration_min || sheetData.duration_min || 1;\n\nif (!topic) throw new Error('No topic found. Add a PENDING row in Google Sheet Dashboard (col B=topic, col E=PENDING).');\n\nreturn [{ json: { job_id: jobId, topic: topic, sheet_row: sheetRow, duration_min: durationMin, start_time: Date.now() } }];"
       },
       "id": "s1-n02",
       "name": "Set Job Config",
@@ -45,7 +45,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const data = $input.first().json;\n\nconst prompt =\n`You are writing narration scripts for a 3Blue1Brown-style physics YouTube video.\\n` +\n`Topic: ${data.topic}\\n\\n` +\n`Write narration for 3 scenes. The total video will be ~60 seconds.\\n` +\n`Each narration will be recorded by a voice actor. Write naturally spoken sentences only.\\n` +\n`DO NOT write any code, equations, or technical jargon — just clear spoken English.\\n\\n` +\n`SCENE WORD TARGETS (ElevenLabs speaks at ~2.5 words/second):\\n` +\n`- Scene 1 (OpeningScene):     55-65 words → ~22-26 seconds\\n` +\n`- Scene 2 (CoreConceptScene): 70-80 words → ~28-32 seconds\\n` +\n`- Scene 3 (SummaryScene):     25-30 words → ~10-12 seconds\\n\\n` +\n`Scene 1 narration: Hook the viewer, introduce the topic, mention real-world relevance.\\n` +\n`Scene 2 narration: Explain the core physics concept step by step. Use simple analogies.\\n` +\n`Scene 3 narration: Summarize the key takeaway in 1-2 sentences. End memorably.\\n\\n` +\n`Return ONLY a raw JSON object — no markdown, no code fences:\\n` +\n`{\\n` +\n`  \"scenes\": [\\n` +\n`    {\\n` +\n`      \"scene_number\": 1,\\n` +\n`      \"class_name\": \"OpeningScene\",\\n` +\n`      \"narration\": \"...\",\\n` +\n`      \"visual_hint\": \"brief description of 2-3 key visuals to show (arrows, equations, diagrams)\"\\n` +\n`    },\\n` +\n`    {\\n` +\n`      \"scene_number\": 2,\\n` +\n`      \"class_name\": \"CoreConceptScene\",\\n` +\n`      \"narration\": \"...\",\\n` +\n`      \"visual_hint\": \"...\"\\n` +\n`    },\\n` +\n`    {\\n` +\n`      \"scene_number\": 3,\\n` +\n`      \"class_name\": \"SummaryScene\",\\n` +\n`      \"narration\": \"...\",\\n` +\n`      \"visual_hint\": \"...\"\\n` +\n`    }\\n` +\n`  ]\\n` +\n`}`;\n\nreturn [{\n  json: {\n    ...data,\n    gemini_script_request: {\n      contents: [{ parts: [{ text: prompt }] }],\n      generationConfig: {\n        maxOutputTokens: 4096,\n        temperature: 0.8,\n        responseMimeType: 'application/json',\n        thinkingConfig: { thinkingBudget: 0 }\n      }\n    }\n  }\n}];"
+        "jsCode": "const data = $input.first().json;\nconst totalSec  = (data.duration_min || 1) * 60;\nconst wps       = 2.5; // ElevenLabs words per second\n\n// Scene split: 35% opening, 45% core, 20% summary\nconst s1sec = Math.round(totalSec * 0.35);\nconst s2sec = Math.round(totalSec * 0.45);\nconst s3sec = totalSec - s1sec - s2sec;\nconst s1words = [Math.round(s1sec*wps*0.85), Math.round(s1sec*wps*1.05)];\nconst s2words = [Math.round(s2sec*wps*0.85), Math.round(s2sec*wps*1.05)];\nconst s3words = [Math.round(s3sec*wps*0.85), Math.round(s3sec*wps*1.05)];\n\nconst prompt =\n`You are writing narration scripts for a 3Blue1Brown-style physics YouTube video.\n`+\n`Topic: ${data.topic}\n\n`+\n`Write narration for 3 scenes. Total video: ~${totalSec} seconds (~${data.duration_min} minute${data.duration_min>1?'s':''}).\n`+\n`Each narration will be recorded by a voice actor. Write naturally spoken sentences only.\n`+\n`DO NOT write any code, equations, or technical jargon — just clear spoken English.\n\n`+\n`SCENE WORD TARGETS (ElevenLabs speaks at ~2.5 words/second):\n`+\n`- Scene 1 (OpeningScene):     ${s1words[0]}-${s1words[1]} words → ~${s1sec} seconds\n`+\n`- Scene 2 (CoreConceptScene): ${s2words[0]}-${s2words[1]} words → ~${s2sec} seconds\n`+\n`- Scene 3 (SummaryScene):     ${s3words[0]}-${s3words[1]} words → ~${s3sec} seconds\n\n`+\n`Scene 1: Hook the viewer, introduce the topic, mention real-world relevance.\n`+\n`Scene 2: Explain the core physics concept step by step. Use simple analogies.\n`+\n`Scene 3: Summarize the key takeaway in 1-2 sentences. End memorably.\n\n`+\n`Return ONLY a raw JSON object — no markdown, no code fences:\n`+\n`{\n`+\n`  \\\"scenes\\\": [\n`+\n`    { \\\"scene_number\\\": 1, \\\"class_name\\\": \\\"OpeningScene\\\",     \\\"narration\\\": \\\"...\\\", \\\"visual_hint\\\": \\\"...\\\" },\n`+\n`    { \\\"scene_number\\\": 2, \\\"class_name\\\": \\\"CoreConceptScene\\\", \\\"narration\\\": \\\"...\\\", \\\"visual_hint\\\": \\\"...\\\" },\n`+\n`    { \\\"scene_number\\\": 3, \\\"class_name\\\": \\\"SummaryScene\\\",     \\\"narration\\\": \\\"...\\\", \\\"visual_hint\\\": \\\"...\\\" }\n`+\n`  ]\n`+\n`}`;\n\nreturn [{ json: { ...data, gemini_script_request: {\n  contents: [{ parts: [{ text: prompt }] }],\n  generationConfig: { maxOutputTokens: 4096, temperature: 0.8, responseMimeType: 'application/json', thinkingConfig: { thinkingBudget: 0 } }\n} } }];"
       },
       "id": "s1-n03",
       "name": "Build Script Prompt",
@@ -231,7 +231,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const res=$input.first().json;\nconst rows=res.values||[];\nlet found=null;\nfor(let i=0;i<rows.length;i++){\n  const s=(rows[i][4]||\"\" ).toString().toUpperCase().trim();\n  if(s===\"PENDING\"){found={idx:i,row:rows[i]};break;}\n}\nif(!found)throw new Error(\"No PENDING topic found in Dashboard tab.\nOpen your Google Sheet -> Dashboard -> set STATUS (col E) = PENDING for a row.\");\nconst sheetRow=found.idx+4;\nconst topic=(found.row[1]||\"\").trim();\nif(!topic)throw new Error(\"PENDING row found but Topic (col B) is empty.\");\nconst jobId=(found.row[0]||\"\").trim()||\"PHY-\"+Date.now().toString().slice(-8);\nconsole.log(\"Sheet row \"+sheetRow+\" | \"+jobId+\" | \"+topic);\nreturn[{json:{job_id:jobId,topic:topic,sheet_row:sheetRow,source:\"google_sheet\"}}];"
+        "jsCode": "const res = $input.first().json;\nconst rows = res.values || [];\nlet found = null;\nfor (let i = 0; i < rows.length; i++) {\n  const s = (rows[i][4] || '').toString().toUpperCase().trim();\n  if (s === 'PENDING') { found = { idx: i, row: rows[i] }; break; }\n}\nif (!found) throw new Error('No PENDING topic in Dashboard tab. Set STATUS (col E) = PENDING for a row.');\nconst sheetRow   = found.idx + 4;\nconst topic      = (found.row[1] || '').trim();\nconst difficulty = (found.row[2] || 'beginner').trim();\nconst durationMin = parseFloat(found.row[3]) || 1;\nif (!topic) throw new Error('PENDING row found but Topic (col B) is empty.');\nconst jobId = (found.row[0] || '').trim() || ('PHY-' + Date.now().toString().slice(-8));\nconsole.log('Row ' + sheetRow + ' | ' + jobId + ' | ' + topic + ' | ' + durationMin + 'min');\nreturn [{ json: { job_id: jobId, topic: topic, difficulty: difficulty, duration_min: durationMin, sheet_row: sheetRow, source: 'google_sheet' } }];"
       },
       "id": "s1-sheet02",
       "name": "Pick PENDING Topic",
@@ -250,7 +250,7 @@
         "nodeCredentialType": "googleDriveOAuth2Api",
         "sendBody": true,
         "contentType": "json",
-        "body": "={{ JSON.stringify({range:\"Ἲc Dashboard!E\"+$json.sheet_row,majorDimension:\"ROWS\",values:[[\"IN_PROGRESS\"]]}) }}",
+        "body": "={ \"majorDimension\": \"ROWS\", \"values\": [[\"IN_PROGRESS\"]] }",
         "options": {
           "timeout": 10000
         }
@@ -279,7 +279,7 @@
         "nodeCredentialType": "googleDriveOAuth2Api",
         "sendBody": true,
         "contentType": "json",
-        "body": "={{ JSON.stringify({range:\"Dashboard!E\"+$(\"Set Job Config\").first().json.sheet_row,majorDimension:\"ROWS\",values:[[\"STAGE2\"]]}) }}",
+        "body": "={ \"majorDimension\": \"ROWS\", \"values\": [[\"STAGE2\"]] }",
         "options": {
           "timeout": 10000
         }
