@@ -13,7 +13,10 @@
       "name": "Stage 2 Webhook",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "position": [0, 0],
+      "position": [
+        220,
+        300
+      ],
       "webhookId": "physics-stage2-video"
     },
     {
@@ -24,17 +27,10 @@
       "name": "Extract Payload",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [220, 0]
-    },
-    {
-      "parameters": {
-        "jsCode": "const https = require('https');\nconst data = $input.first().json;\nconst apiKey = $env.WAVESPEED_API_KEY;\nconst clipPrompts = data.clip_prompts;\n\nfunction apiCall(method, path, body) {\n  return new Promise((resolve, reject) => {\n    const buf = body ? Buffer.from(JSON.stringify(body)) : null;\n    const headers = { 'Authorization': 'Bearer ' + apiKey };\n    if (buf) { headers['Content-Type'] = 'application/json'; headers['Content-Length'] = buf.length; }\n    const req = https.request({ hostname: 'api.wavespeed.ai', path, method, headers }, (res) => {\n      const chunks = []; res.on('data', c => chunks.push(c));\n      res.on('end', () => resolve(JSON.parse(Buffer.concat(chunks).toString())));\n    });\n    req.on('error', reject);\n    if (buf) req.write(buf);\n    req.end();\n  });\n}\n\nasync function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }\n\n// Submit all clips\nconst ids = [];\nfor (let i = 0; i < clipPrompts.length; i++) {\n  const r = await apiCall('POST', '/api/v3/bytedance/seedance-1-lite/text-to-video', {\n    prompt: clipPrompts[i], aspect_ratio: '9:16', duration: 10, resolution: '720p', generate_audio: false, seed: -1\n  });\n  if (!r.data || !r.data.id) throw new Error('Wavespeed submit failed clip ' + i + ': ' + JSON.stringify(r));\n  ids.push(r.data.id);\n  console.log('Submitted clip ' + i + ': ' + r.data.id);\n}\n\n// Poll all until complete\nconst urls = new Array(ids.length).fill(null);\nconst deadline = Date.now() + 900000; // 15 min max\nwhile (urls.some(u => u === null)) {\n  if (Date.now() > deadline) throw new Error('Wavespeed polling timeout after 15 minutes');\n  await sleep(8000);\n  for (let i = 0; i < ids.length; i++) {\n    if (urls[i]) continue;\n    const r = await apiCall('GET', '/api/v3/predictions/' + ids[i], null);\n    const status = r.data && r.data.status;\n    console.log('Clip ' + i + ' status: ' + status);\n    if (status === 'completed') {\n      urls[i] = r.data.outputs && r.data.outputs[0];\n      if (!urls[i]) throw new Error('Clip ' + i + ' completed but no output URL');\n    } else if (status === 'failed') {\n      throw new Error('Clip ' + i + ' failed: ' + JSON.stringify(r));\n    }\n  }\n}\n\nconsole.log('All clips ready:', urls);\nreturn [{ json: { ...data, video_urls: urls } }];"
-      },
-      "id": "node3",
-      "name": "Submit and Poll Wavespeed",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [440, 0]
+      "position": [
+        440,
+        300
+      ]
     },
     {
       "parameters": {
@@ -44,7 +40,10 @@
       "name": "Assemble Video",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [660, 0]
+      "position": [
+        1540,
+        300
+      ]
     },
     {
       "parameters": {
@@ -54,7 +53,10 @@
       "name": "Read Final Video",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [880, 0]
+      "position": [
+        1760,
+        300
+      ]
     },
     {
       "parameters": {
@@ -79,7 +81,10 @@
       "name": "Upload Animation to Drive",
       "type": "n8n-nodes-base.googleDrive",
       "typeVersion": 3,
-      "position": [1100, 0],
+      "position": [
+        1980,
+        300
+      ],
       "credentials": {
         "googleDriveOAuth2Api": {
           "id": "QUGEpurbhr31d8QZ",
@@ -115,7 +120,10 @@
       "name": "Make Animation Public",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
-      "position": [1320, 0],
+      "position": [
+        2200,
+        300
+      ],
       "credentials": {
         "googleDriveOAuth2Api": {
           "id": "QUGEpurbhr31d8QZ",
@@ -131,7 +139,10 @@
       "name": "Stage 2 Done",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1540, 0]
+      "position": [
+        2420,
+        300
+      ]
     },
     {
       "parameters": {
@@ -151,11 +162,86 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "continueOnFail": true,
-      "position": [1760, 0],
+      "position": [
+        2640,
+        300
+      ],
       "credentials": {
         "googleDriveOAuth2Api": {
           "id": "QUGEpurbhr31d8QZ",
           "name": "Google Drive account 3"
+        }
+      }
+    },
+    {
+      "id": "nodeSubmit",
+      "name": "Submit Clips to Wavespeed",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const https = require('https');\nconst data = $input.first().json;\nconst apiKey = $env.WAVESPEED_API_KEY;\nconst clipPrompts = data.clip_prompts;\n\nif (!Array.isArray(clipPrompts) || clipPrompts.length === 0)\n  throw new Error('No clip_prompts in payload');\n\nfunction apiPost(body) {\n  return new Promise((resolve, reject) => {\n    const buf = Buffer.from(JSON.stringify(body));\n    const req = https.request({\n      hostname: 'api.wavespeed.ai',\n      path: '/api/v3/bytedance/seedance-1-lite/text-to-video',\n      method: 'POST',\n      headers: {\n        'Authorization': 'Bearer ' + apiKey,\n        'Content-Type': 'application/json',\n        'Content-Length': buf.length\n      }\n    }, (res) => {\n      const chunks = [];\n      res.on('data', c => chunks.push(c));\n      res.on('end', () => resolve(JSON.parse(Buffer.concat(chunks).toString())));\n    });\n    req.on('error', reject);\n    req.write(buf);\n    req.end();\n  });\n}\n\n// Submit all 3 clips to Wavespeed\nconst task_ids = [];\nfor (let i = 0; i < clipPrompts.length; i++) {\n  const r = await apiPost({\n    prompt: clipPrompts[i],\n    aspect_ratio: '9:16',\n    duration: 10,\n    resolution: '720p',\n    generate_audio: false,\n    seed: -1\n  });\n  if (!r.data || !r.data.id)\n    throw new Error('Wavespeed submit failed clip ' + i + ': ' + JSON.stringify(r));\n  task_ids.push(r.data.id);\n  console.log('Clip ' + i + ' submitted — id: ' + r.data.id);\n}\n\nconsole.log('All 3 clips submitted. Waiting for generation...');\n\nreturn [{ json: {\n  ...data,\n  task_ids,\n  video_urls: [null, null, null],\n  poll_attempt: 0,\n  all_done: false\n}}];\n"
+      }
+    },
+    {
+      "id": "nodeWait",
+      "name": "Wait 20 Seconds",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [
+        880,
+        300
+      ],
+      "webhookId": "wavespeed-poll-resume",
+      "parameters": {
+        "amount": 20,
+        "unit": "seconds"
+      }
+    },
+    {
+      "id": "nodeCheck",
+      "name": "Check Clip Status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const https = require('https');\nconst data = $input.first().json;\nconst apiKey = $env.WAVESPEED_API_KEY;\nconst task_ids   = data.task_ids;\nconst video_urls = [...(data.video_urls || [null, null, null])];\nconst attempt    = (data.poll_attempt || 0) + 1;\n\nconsole.log('--- Poll attempt #' + attempt + ' ---');\n\nfunction apiGet(taskId) {\n  return new Promise((resolve, reject) => {\n    const req = https.request({\n      hostname: 'api.wavespeed.ai',\n      path: '/api/v3/predictions/' + taskId,\n      method: 'GET',\n      headers: { 'Authorization': 'Bearer ' + apiKey }\n    }, (res) => {\n      const chunks = [];\n      res.on('data', c => chunks.push(c));\n      res.on('end', () => resolve(JSON.parse(Buffer.concat(chunks).toString())));\n    });\n    req.on('error', reject);\n    req.end();\n  });\n}\n\n// Check each clip that is not yet complete\nfor (let i = 0; i < task_ids.length; i++) {\n  if (video_urls[i] !== null) {\n    console.log('Clip ' + i + ' already done, skipping');\n    continue;\n  }\n\n  const r = await apiGet(task_ids[i]);\n  const status = (r.data && r.data.status) || 'unknown';\n  console.log('Clip ' + i + ' [' + task_ids[i] + '] status: ' + status);\n\n  if (status === 'completed') {\n    const url = r.data.outputs && r.data.outputs[0];\n    if (!url) throw new Error('Clip ' + i + ' completed but output URL missing');\n    video_urls[i] = url;\n    console.log('Clip ' + i + ' ready: ' + url);\n  } else if (status === 'failed') {\n    throw new Error('Clip ' + i + ' FAILED: ' + JSON.stringify(r.data));\n  } else {\n    console.log('Clip ' + i + ' still ' + status + ' — will retry in 20s');\n  }\n}\n\nconst all_done = video_urls.every(u => u !== null);\nconst pending  = video_urls.filter(u => u === null).length;\n\nif (all_done) {\n  console.log('All 3 clips are ready! Proceeding to assembly.');\n} else {\n  console.log(pending + ' clip(s) still generating. Waiting 20s before next poll.');\n}\n\nreturn [{ json: {\n  ...data,\n  task_ids,\n  video_urls,\n  poll_attempt: attempt,\n  all_done\n}}];\n"
+      }
+    },
+    {
+      "id": "nodeIf",
+      "name": "All Clips Ready?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond1",
+              "leftValue": "={{ $json.all_done }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equal"
+              }
+            }
+          ],
+          "combinator": "and"
         }
       }
     }
@@ -176,18 +262,58 @@
       "main": [
         [
           {
-            "node": "Submit and Poll Wavespeed",
+            "node": "Submit Clips to Wavespeed",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Submit and Poll Wavespeed": {
+    "Submit Clips to Wavespeed": {
+      "main": [
+        [
+          {
+            "node": "Wait 20 Seconds",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 20 Seconds": {
+      "main": [
+        [
+          {
+            "node": "Check Clip Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Clip Status": {
+      "main": [
+        [
+          {
+            "node": "All Clips Ready?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "All Clips Ready?": {
       "main": [
         [
           {
             "node": "Assemble Video",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait 20 Seconds",
             "type": "main",
             "index": 0
           }
@@ -256,7 +382,6 @@
     "saveManualExecutions": true
   },
   "id": "physics-stage2-pipeline",
-  "name": "Physics Channel - Stage 2 - Video Generation",
   "tags": [
     {
       "name": "physics-channel"
