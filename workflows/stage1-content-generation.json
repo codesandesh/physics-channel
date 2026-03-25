@@ -3,14 +3,11 @@
   "nodes": [
     {
       "parameters": {},
-      "id": "s1-manual",
+      "id": "node1",
       "name": "Manual Trigger",
       "type": "n8n-nodes-base.manualTrigger",
       "typeVersion": 1,
-      "position": [
-        240,
-        160
-      ]
+      "position": [0, 0]
     },
     {
       "parameters": {
@@ -20,41 +17,90 @@
         "responseData": "firstEntryJson",
         "options": {}
       },
-      "id": "s1-n01",
+      "id": "node2",
       "name": "Stage 1 Webhook",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 1,
-      "position": [
-        240,
-        300
-      ],
+      "position": [0, 200],
       "webhookId": "physics-stage1-generate"
     },
     {
       "parameters": {
-        "jsCode": "const raw  = $input.first().json;\nconst body = (raw.body !== undefined) ? raw.body : raw;\n\nlet sheetData = {};\ntry { sheetData = $('Pick PENDING Topic').first().json; } catch(e) {}\n\nconst jobId      = body.job_id      || raw.job_id      || sheetData.job_id      || ('PHY-' + Date.now().toString().slice(-8));\nconst topic      = body.topic       || raw.topic       || sheetData.topic;\nconst sheetRow   = body.sheet_row   || raw.sheet_row   || sheetData.sheet_row   || null;\nconst durationMin = body.duration_min || raw.duration_min || sheetData.duration_min || 1;\n\nif (!topic) throw new Error('No topic found. Add a PENDING row in Google Sheet Dashboard (col B=topic, col E=PENDING).');\n\nreturn [{ json: { job_id: jobId, topic: topic, sheet_row: sheetRow, duration_min: durationMin, start_time: Date.now() } }];"
+        "method": "GET",
+        "url": "https://sheets.googleapis.com/v4/spreadsheets/17sx-y_QDWYHFPR4sfpx9pPd8YHFx-aX8jh8tLtZXELQ/values/%F0%9F%8E%AC%20Dashboard!A4:O",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleDriveOAuth2Api",
+        "options": {
+          "timeout": 10000
+        }
       },
-      "id": "s1-n02",
-      "name": "Set Job Config",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        460,
-        300
-      ]
+      "id": "node3",
+      "name": "Read Topic From Sheet",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [220, 0],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "QUGEpurbhr31d8QZ",
+          "name": "Google Drive account 3"
+        }
+      }
     },
     {
       "parameters": {
-        "jsCode": "const data = $input.first().json;\nconst totalSec  = (data.duration_min || 1) * 60;\nconst wps       = 2.5; // ElevenLabs words per second\n\n// Scene split: 35% opening, 45% core, 20% summary\nconst s1sec = Math.round(totalSec * 0.35);\nconst s2sec = Math.round(totalSec * 0.45);\nconst s3sec = totalSec - s1sec - s2sec;\nconst s1words = [Math.round(s1sec*wps*0.85), Math.round(s1sec*wps*1.05)];\nconst s2words = [Math.round(s2sec*wps*0.85), Math.round(s2sec*wps*1.05)];\nconst s3words = [Math.round(s3sec*wps*0.85), Math.round(s3sec*wps*1.05)];\n\nconst prompt =\n`You are writing narration scripts for a 3Blue1Brown-style physics YouTube video.\n`+\n`Topic: ${data.topic}\n\n`+\n`Write narration for 3 scenes. Total video: ~${totalSec} seconds (~${data.duration_min} minute${data.duration_min>1?'s':''}).\n`+\n`Each narration will be recorded by a voice actor. Write naturally spoken sentences only.\n`+\n`DO NOT write any code, equations, or technical jargon — just clear spoken English.\n\n`+\n`SCENE WORD TARGETS (ElevenLabs speaks at ~2.5 words/second):\n`+\n`- Scene 1 (OpeningScene):     ${s1words[0]}-${s1words[1]} words → ~${s1sec} seconds\n`+\n`- Scene 2 (CoreConceptScene): ${s2words[0]}-${s2words[1]} words → ~${s2sec} seconds\n`+\n`- Scene 3 (SummaryScene):     ${s3words[0]}-${s3words[1]} words → ~${s3sec} seconds\n\n`+\n`Scene 1: Hook the viewer, introduce the topic, mention real-world relevance.\n`+\n`Scene 2: Explain the core physics concept step by step. Use simple analogies.\n`+\n`Scene 3: Summarize the key takeaway in 1-2 sentences. End memorably.\n\n`+\n`Return ONLY a raw JSON object — no markdown, no code fences:\n`+\n`{\n`+\n`  \\\"scenes\\\": [\n`+\n`    { \\\"scene_number\\\": 1, \\\"class_name\\\": \\\"OpeningScene\\\",     \\\"narration\\\": \\\"...\\\", \\\"visual_hint\\\": \\\"...\\\" },\n`+\n`    { \\\"scene_number\\\": 2, \\\"class_name\\\": \\\"CoreConceptScene\\\", \\\"narration\\\": \\\"...\\\", \\\"visual_hint\\\": \\\"...\\\" },\n`+\n`    { \\\"scene_number\\\": 3, \\\"class_name\\\": \\\"SummaryScene\\\",     \\\"narration\\\": \\\"...\\\", \\\"visual_hint\\\": \\\"...\\\" }\n`+\n`  ]\n`+\n`}`;\n\nreturn [{ json: { ...data, gemini_script_request: {\n  contents: [{ parts: [{ text: prompt }] }],\n  generationConfig: { maxOutputTokens: 4096, temperature: 0.8, responseMimeType: 'application/json', thinkingConfig: { thinkingBudget: 0 } }\n} } }];"
+        "jsCode": "const res = $input.first().json;\nconst rows = res.values || [];\nlet found = null;\nfor (let i = 0; i < rows.length; i++) {\n  const s = (rows[i][4] || '').toString().toUpperCase().trim();\n  if (s === 'PENDING') { found = { idx: i, row: rows[i] }; break; }\n}\nif (!found) throw new Error('No PENDING topic in Dashboard tab. Set STATUS (col E) = PENDING for a row.');\nconst sheetRow   = found.idx + 4;\nconst topic      = (found.row[1] || '').trim();\nconst difficulty = (found.row[2] || 'beginner').trim();\nconst durationMin = parseFloat(found.row[3]) || 1;\nif (!topic) throw new Error('PENDING row found but Topic (col B) is empty.');\nconst jobId = (found.row[0] || '').trim() || ('PHY-' + Date.now().toString().slice(-8));\nconsole.log('Row ' + sheetRow + ' | ' + jobId + ' | ' + topic + ' | ' + durationMin + 'min');\nreturn [{ json: { job_id: jobId, topic: topic, difficulty: difficulty, duration_min: durationMin, sheet_row: sheetRow, source: 'google_sheet' } }];"
       },
-      "id": "s1-n03",
+      "id": "node4",
+      "name": "Pick PENDING Topic",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 0]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ 'https://sheets.googleapis.com/v4/spreadsheets/17sx-y_QDWYHFPR4sfpx9pPd8YHFx-aX8jh8tLtZXELQ/values/%F0%9F%8E%AC%20Dashboard!E' + $json.sheet_row + '?valueInputOption=USER_ENTERED' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleDriveOAuth2Api",
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={ \"majorDimension\": \"ROWS\", \"values\": [[\"IN_PROGRESS\"]] }",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "node5",
+      "name": "Mark IN_PROGRESS in Sheet",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "continueOnFail": true,
+      "position": [660, 0],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "QUGEpurbhr31d8QZ",
+          "name": "Google Drive account 3"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw  = $input.first().json;\nconst body = (raw.body !== undefined) ? raw.body : raw;\n\nlet sheetData = {};\ntry { sheetData = $('Pick PENDING Topic').first().json; } catch(e) {}\n\nconst jobId    = body.job_id    || raw.job_id    || sheetData.job_id    || ('PHY-' + Date.now().toString().slice(-8));\nconst topic    = body.topic     || raw.topic     || sheetData.topic;\nconst sheetRow = body.sheet_row || raw.sheet_row || sheetData.sheet_row || null;\n\nif (!topic) throw new Error('No topic found. Add a PENDING row in Google Sheet Dashboard (col B=topic, col E=PENDING).');\n\nreturn [{ json: { job_id: jobId, topic: topic, sheet_row: sheetRow, start_time: Date.now() } }];"
+      },
+      "id": "node6",
+      "name": "Set Job Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\n\nconst prompt = `You are a script writer for a physics YouTube Shorts channel.\nTopic: ${data.topic}\n\nWrite a 20-25 second engaging script for a vertical (9:16) physics YouTube Short.\nReturn ONLY a raw JSON object with no markdown fences:\n{\n  \"narration\": \"50-70 word narration text. Engaging, educational, conversational. No jargon.\",\n  \"clip_prompts\": [\n    \"Detailed Seedance video generation prompt for clip 1, cinematic 9:16 vertical physics visual, ~80 chars vivid description\",\n    \"Detailed Seedance video generation prompt for clip 2, cinematic 9:16 vertical physics visual, ~80 chars vivid description\",\n    \"Detailed Seedance video generation prompt for clip 3, cinematic 9:16 vertical physics visual, ~80 chars vivid description\"\n  ],\n  \"title\": \"Short punchy YouTube title under 60 chars\",\n  \"hashtags\": \"#physics #science #shorts #learn\"\n}\n\nREQUIREMENTS:\n- narration: exactly 50-70 words, spoken naturally, hooks viewer immediately\n- clip_prompts: exactly 3 strings, each describing a physics-themed cinematic visual for 9:16 vertical video, be vivid and specific\n- title: punchy, curiosity-inducing, under 60 characters\n- hashtags: 4-6 relevant hashtags as a single string`;\n\nreturn [{ json: { ...data, gemini_script_request: {\n  contents: [{ parts: [{ text: prompt }] }],\n  generationConfig: { maxOutputTokens: 2048, temperature: 0.8, responseMimeType: 'application/json', thinkingConfig: { thinkingBudget: 0 } }\n} } }];"
+      },
+      "id": "node7",
       "name": "Build Script Prompt",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        680,
-        300
-      ]
+      "position": [1100, 0]
     },
     {
       "parameters": {
@@ -76,200 +122,58 @@
           "timeout": 60000
         }
       },
-      "id": "s1-n04",
+      "id": "node8",
       "name": "Gemini Generate Script",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
-      "position": [
-        900,
-        300
-      ]
+      "position": [1320, 0]
     },
     {
       "parameters": {
-        "jsCode": "const response  = $input.first().json;\nconst jobConfig = $('Set Job Config').first().json;\n\nif (!response.candidates || !response.candidates[0] || !response.candidates[0].content) {\n  throw new Error('Gemini script response empty: ' + JSON.stringify(response).slice(0, 300));\n}\n\nlet rawText = response.candidates[0].content.parts[0].text.trim();\nrawText = rawText.replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```\\s*$/i, '').trim();\n\nfunction repairJson(text) {\n  let result = '', inString = false, escape = false;\n  for (let i = 0; i < text.length; i++) {\n    const ch = text[i];\n    if (escape) { result += ch; escape = false; continue; }\n    if (ch === '\\\\' && inString) { escape = true; result += ch; continue; }\n    if (ch === '\"') { inString = !inString; result += ch; continue; }\n    if (inString) {\n      if (ch === '\\n') { result += '\\\\n'; continue; }\n      if (ch === '\\r') { result += '\\\\r'; continue; }\n      if (ch === '\\t') { result += '\\\\t'; continue; }\n    }\n    result += ch;\n  }\n  return result;\n}\n\nlet parsed;\ntry { parsed = JSON.parse(rawText); } catch(e1) {\n  const start = rawText.indexOf('{'), end = rawText.lastIndexOf('}');\n  const block = (start !== -1 && end !== -1) ? rawText.slice(start, end + 1) : rawText;\n  try { parsed = JSON.parse(block); } catch(e2) {\n    try { parsed = JSON.parse(repairJson(block)); } catch(e3) {\n      throw new Error('Failed to parse script JSON: ' + rawText.slice(0, 500));\n    }\n  }\n}\n\nif (!Array.isArray(parsed.scenes) || parsed.scenes.length === 0)\n  throw new Error('Script response missing scenes array');\n\nfor (const scene of parsed.scenes) {\n  if (!scene.class_name)  throw new Error('Scene missing class_name');\n  if (!scene.narration)   throw new Error('Scene missing narration: ' + scene.class_name);\n  if (!scene.scene_number) scene.scene_number = parsed.scenes.indexOf(scene) + 1;\n  if (!scene.visual_hint) scene.visual_hint = '';\n}\n\nconsole.log('Script generated. Scenes: ' + parsed.scenes.map(s => s.class_name + '(' + s.narration.split(' ').length + 'w)').join(', '));\n\nreturn [{\n  json: {\n    ...jobConfig,\n    scenes: parsed.scenes,\n    scene_count: parsed.scenes.length\n  }\n}];"
+        "jsCode": "const response  = $input.first().json;\nconst jobConfig = $('Set Job Config').first().json;\n\nif (!response.candidates || !response.candidates[0] || !response.candidates[0].content) {\n  throw new Error('Gemini script response empty: ' + JSON.stringify(response).slice(0, 300));\n}\n\nlet rawText = response.candidates[0].content.parts[0].text.trim();\nrawText = rawText.replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```\\s*$/i, '').trim();\n\nlet parsed;\ntry { parsed = JSON.parse(rawText); } catch(e1) {\n  const start = rawText.indexOf('{'), end = rawText.lastIndexOf('}');\n  const block = (start !== -1 && end !== -1) ? rawText.slice(start, end + 1) : rawText;\n  try { parsed = JSON.parse(block); } catch(e2) {\n    throw new Error('Failed to parse script JSON: ' + rawText.slice(0, 500));\n  }\n}\n\nif (!parsed.narration) throw new Error('Response missing narration field');\nif (!Array.isArray(parsed.clip_prompts) || parsed.clip_prompts.length !== 3) {\n  throw new Error('Response must have clip_prompts array of exactly 3 items. Got: ' + JSON.stringify(parsed.clip_prompts));\n}\n\nconsole.log('Script generated. Narration words: ' + parsed.narration.split(' ').length);\nconsole.log('Clip prompts: ' + parsed.clip_prompts.length);\n\nreturn [{\n  json: {\n    ...jobConfig,\n    narration: parsed.narration,\n    clip_prompts: parsed.clip_prompts,\n    title: parsed.title || jobConfig.topic,\n    hashtags: parsed.hashtags || '#physics #science #shorts'\n  }\n}];"
       },
-      "id": "s1-n05",
+      "id": "node9",
       "name": "Parse Script Response",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        1120,
-        300
-      ]
+      "position": [1540, 0]
     },
     {
       "parameters": {
-        "jsCode": "// Generate ElevenLabs audio per scene, then measure EXACT duration with ffprobe.\n// The exact audio duration is passed to Gemini so Manim code can sync perfectly.\nconst fs    = require('fs');\nconst https = require('https');\nconst { execSync } = require('child_process');\n\nconst data    = $input.first().json;\nconst apiKey  = $env.ELEVENLABS_API_KEY;\nconst voiceId = $env.ELEVENLABS_VOICE_ID;\n\nfunction httpsPost(hostname, path, headers, body) {\n  return new Promise((resolve, reject) => {\n    const bodyBuf = Buffer.from(body, 'utf-8');\n    const req = https.request(\n      { hostname, path, method: 'POST', headers: { ...headers, 'Content-Length': bodyBuf.length } },\n      (res) => {\n        const chunks = [];\n        res.on('data', c => chunks.push(c));\n        res.on('end', () => {\n          const buf = Buffer.concat(chunks);\n          if (res.statusCode !== 200)\n            reject(new Error('HTTP ' + res.statusCode + ': ' + buf.toString().slice(0, 300)));\n          else\n            resolve(buf);\n        });\n      }\n    );\n    req.on('error', reject);\n    req.write(bodyBuf);\n    req.end();\n  });\n}\n\nconst dir = '/data/manim/combined';\nif (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });\n\nconst scenesWithAudio = [];\n\nfor (const scene of data.scenes) {\n  const audioPathN8n  = `${dir}/${data.job_id}_scene${scene.scene_number}_audio.mp3`;\n  const audioPathCont = `/manim/combined/${data.job_id}_scene${scene.scene_number}_audio.mp3`;\n\n  // Generate audio\n  const body = JSON.stringify({\n    text:           scene.narration,\n    model_id:       'eleven_multilingual_v2',\n    voice_settings: { stability: 0.5, similarity_boost: 0.75 }\n  });\n\n  let audioBuf;\n  try {\n    audioBuf = await httpsPost(\n      'api.elevenlabs.io',\n      `/v1/text-to-speech/${voiceId}`,\n      { 'xi-api-key': apiKey, 'Content-Type': 'application/json', 'Accept': 'audio/mpeg' },\n      body\n    );\n  } catch(err) {\n    throw new Error('ElevenLabs failed scene ' + scene.scene_number + ': ' + err.message);\n  }\n\n  if (audioBuf.length < 100) throw new Error('Empty audio for scene ' + scene.scene_number);\n  fs.writeFileSync(audioPathN8n, audioBuf);\n\n  // Measure EXACT audio duration with ffprobe\n  let audioDuration = 0;\n  try {\n    const durOut = execSync(\n      `docker exec manim-runner bash -c 'ffprobe -v error -show_entries format=duration -of csv=p=0 \"${audioPathCont}\"'`,\n      { encoding: 'utf-8', timeout: 15000 }\n    );\n    audioDuration = parseFloat(durOut.trim()) || 0;\n  } catch(e) {\n    // Fallback: estimate from word count (ElevenLabs ≈ 2.5 words/sec)\n    const wordCount = scene.narration.trim().split(/\\s+/).length;\n    audioDuration = wordCount / 2.5;\n    console.warn('ffprobe fallback for scene ' + scene.scene_number + ', estimated=' + audioDuration.toFixed(1) + 's');\n  }\n\n  console.log(`Scene ${scene.scene_number} audio: ${audioBuf.length} bytes, duration=${audioDuration.toFixed(2)}s`);\n\n  scenesWithAudio.push({\n    ...scene,\n    audio_path_n8n:           audioPathN8n,\n    audio_path_cont:          audioPathCont,\n    audio_duration_seconds:   parseFloat(audioDuration.toFixed(2))\n  });\n}\n\nconst totalAudio = scenesWithAudio.reduce((s, sc) => s + sc.audio_duration_seconds, 0);\nconsole.log('Total audio duration: ' + totalAudio.toFixed(1) + 's');\n\nreturn [{ json: { ...data, scenes: scenesWithAudio } }];"
+        "jsCode": "const https = require('https');\nconst fs = require('fs');\n\nconst data = $input.first().json;\nconst apiKey = $env.ELEVENLABS_API_KEY;\nconst voiceId = $env.ELEVENLABS_VOICE_ID;\nconst jobId = data.job_id;\n\nfunction httpsPost(hostname, path, headers, bodyStr) {\n  return new Promise((resolve, reject) => {\n    const buf = Buffer.from(bodyStr, 'utf-8');\n    const req = https.request({ hostname, path, method: 'POST', headers: { ...headers, 'Content-Length': buf.length } }, (res) => {\n      const chunks = [];\n      res.on('data', c => chunks.push(c));\n      res.on('end', () => resolve({ status: res.statusCode, body: Buffer.concat(chunks).toString() }));\n    });\n    req.on('error', reject);\n    req.write(buf);\n    req.end();\n  });\n}\n\nconst body = JSON.stringify({\n  text: data.narration,\n  model_id: 'eleven_multilingual_v2',\n  voice_settings: { stability: 0.5, similarity_boost: 0.8 }\n});\n\nconst res = await httpsPost('api.elevenlabs.io', '/v1/text-to-speech/' + voiceId + '/with-timestamps', {\n  'Content-Type': 'application/json',\n  'xi-api-key': apiKey\n}, body);\n\nif (res.status !== 200) throw new Error('ElevenLabs error ' + res.status + ': ' + res.body);\n\nconst result = JSON.parse(res.body);\nconst { audio_base64, alignment } = result;\n\n// Save audio\nconst inputDir = '/data/ffmpeg/input';\nif (!require('fs').existsSync(inputDir)) require('fs').mkdirSync(inputDir, { recursive: true });\nconst audioPath = '/data/ffmpeg/input/' + jobId + '_narration.mp3';\nfs.writeFileSync(audioPath, Buffer.from(audio_base64, 'base64'));\n\n// Build word-level subtitle chunks\nconst chars = alignment.characters;\nconst starts = alignment.character_start_times_seconds;\nconst durs = alignment.character_durations_seconds;\nconst totalDuration = starts[starts.length - 1] + durs[durs.length - 1];\n\nconst words = [];\nlet wChars = '', wStart = null, wEnd = 0;\nfor (let i = 0; i < chars.length; i++) {\n  if (chars[i] === ' ' || chars[i] === '\\n') {\n    if (wChars.trim()) words.push({ text: wChars.trim(), start: wStart, end: wEnd });\n    wChars = ''; wStart = null;\n  } else {\n    if (wStart === null) wStart = starts[i];\n    wEnd = starts[i] + durs[i];\n    wChars += chars[i];\n  }\n}\nif (wChars.trim()) words.push({ text: wChars.trim(), start: wStart, end: wEnd });\n\nconst chunks = [];\nconst PER = 5;\nfor (let i = 0; i < words.length; i += PER) {\n  const g = words.slice(i, i + PER);\n  chunks.push({ text: g.map(w => w.text).join(' '), start: g[0].start, end: g[g.length-1].end + 0.1 });\n}\n\nconst subsPath = '/data/ffmpeg/input/' + jobId + '_subs.json';\nfs.writeFileSync(subsPath, JSON.stringify(chunks));\n\nreturn [{ json: { ...data, audio_path: audioPath, subs_path: subsPath, audio_duration: totalDuration, subtitle_chunks: chunks } }];"
       },
-      "id": "s1-n06",
-      "name": "Generate Scene Audio",
+      "id": "node10",
+      "name": "Generate Audio",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        1340,
-        300
-      ]
+      "position": [1760, 0]
     },
     {
       "parameters": {
-        "jsCode": "const data = $input.first().json;\n\n// Build per-scene spec with exact audio duration and narration beat analysis\nconst sceneSpecs = data.scenes.map(s => {\n  const dur = s.audio_duration_seconds || 20;\n  const words = s.narration.trim().split(/\\s+/);\n  const wps = (words.length / dur).toFixed(2);\n\n  // Estimate approximate timing of narration quarters (for animation beat alignment)\n  const q1 = (dur * 0.25).toFixed(1);\n  const q2 = (dur * 0.50).toFixed(1);\n  const q3 = (dur * 0.75).toFixed(1);\n\n  // Split narration into quarters to show which words land at which beat\n  const quarterLen = Math.floor(words.length / 4);\n  const beat1words = words.slice(0, quarterLen).join(' ');\n  const beat2words = words.slice(quarterLen, quarterLen * 2).join(' ');\n  const beat3words = words.slice(quarterLen * 2, quarterLen * 3).join(' ');\n  const beat4words = words.slice(quarterLen * 3).join(' ');\n\n  return [\n    `━━━ SCENE ${s.scene_number}: class_name=\"${s.class_name}\" ━━━`,\n    `Audio duration: EXACTLY ${dur.toFixed(2)} seconds (${words.length} words @ ${wps} words/sec)`,\n    `Visual hint: ${s.visual_hint || 'physics diagram with equations and vectors'}`,\n    `Narration: \"${s.narration}\"`,\n    ``,\n    `Narration timing breakdown (sync your animations to these beats):`,\n    `  0s – ${q1}s  → \"${beat1words}\"`,\n    `  ${q1}s – ${q2}s → \"${beat2words}\"`,\n    `  ${q2}s – ${q3}s → \"${beat3words}\"`,\n    `  ${q3}s – ${dur.toFixed(1)}s → \"${beat4words}\"`,\n    ``,\n    `MANDATORY: sum of all run_time + self.wait() in this scene = ${dur.toFixed(2)} seconds`\n  ].join('\\n');\n}).join('\\n\\n');\n\nconst totalDur = data.scenes.reduce((sum, s) => sum + (s.audio_duration_seconds || 20), 0);\n\nconst prompt =\n`You are a world-class physics animator generating Manim Community Edition v0.20.0 code.\\n` +\n`Topic: ${data.topic}\\n` +\n`Total video duration: ${totalDur.toFixed(1)} seconds\\n\\n` +\n\n`THE NARRATION AUDIO IS ALREADY RECORDED. Your Manim animation MUST sync to it perfectly.\\n` +\n`Each animation must appear ON SCREEN exactly when the narrator SPEAKS about it.\\n\\n` +\n\n`${sceneSpecs}\\n\\n` +\n\n`═══════════════════════════════════════════════════\\n` +\n`RULE 1 — PERFECT TIMING (non-negotiable):\\n` +\n`═══════════════════════════════════════════════════\\n` +\n`For each scene, the TOTAL of every run_time + every self.wait() MUST equal audio_duration seconds.\\n` +\n`\\n` +\n`Standard animation durations to use:\\n` +\n`  Write(text):                            run_time=1.5\\n` +\n`  Create(shape) / GrowArrow():            run_time=1.5\\n` +\n`  FadeIn() / FadeOut():                   run_time=0.8\\n` +\n`  Transform() / TransformMatchingShapes: run_time=2.0\\n` +\n`  .animate.shift() / .animate.move_to(): run_time=1.5\\n` +\n`  .animate.set_value() (ValueTracker):   run_time=3.0 (shows smooth change)\\n` +\n`  Indicate() / Circumscribe():            run_time=1.0\\n` +\n`  self.wait() to let narration breathe:  1.5–2.5s\\n` +\n`  self.wait() at scene end:              0.5s\\n` +\n`\\n` +\n`SYNC TECHNIQUE: For each narration beat (0s, quarter, half, 3-quarter of scene),\\n` +\n`start a matching animation so the visual appears AS the narrator speaks about it.\\n` +\n`\\n` +\n`═══════════════════════════════════════════════════\\n` +\n`RULE 2 — ZERO OVERLAPPING OBJECTS (non-negotiable):\\n` +\n`═══════════════════════════════════════════════════\\n` +\n`Every single object MUST have an explicit position. Never rely on defaults.\\n` +\n`\\n` +\n`SCREEN LAYOUT ZONES (use exactly these regions):\\n` +\n`  TITLE ZONE:      obj.to_edge(UP).shift(DOWN*0.3)         font_size=38 MAX\\n` +\n`  LEFT DIAGRAM:    obj.move_to(LEFT*3.2 + UP*0.5)\\n` +\n`  RIGHT DIAGRAM:   obj.move_to(RIGHT*3.2 + UP*0.5)\\n` +\n`  CENTER EQUATION: obj.move_to(ORIGIN) or obj.move_to(DOWN*0.5)\\n` +\n`  BOTTOM LABEL:    obj.to_edge(DOWN).shift(UP*0.3)          font_size=28 MAX\\n` +\n`\\n` +\n`POSITIONING RULES:\\n` +\n`  - Stack vertically with buff=0.5: obj2.next_to(obj1, DOWN, buff=0.5)\\n` +\n`  - Arrow labels: label.next_to(arrow.get_center(), UP, buff=0.3)\\n` +\n`  - Axes: axes.move_to(ORIGIN) or axes.move_to(RIGHT*2+DOWN*0.5)\\n` +\n`  - NEVER place more than 1 object at ORIGIN or UP*0 simultaneously\\n` +\n`\\n` +\n`CLEARING BETWEEN SECTIONS:\\n` +\n`  When switching from one diagram/topic to the next within a scene, ALWAYS clear first:\\n` +\n`  self.play(*[FadeOut(m, run_time=0.8) for m in self.mobjects]); self.wait(0.3)\\n` +\n`  (Do NOT do this at the very end of scene — just let it cut naturally)\\n` +\n`\\n` +\n`ONLY use self.add() for always_redraw lambda objects (ValueTracker dots/labels).\\n` +\n`ALL other objects must be introduced with self.play().\\n` +\n`\\n` +\n`═══════════════════════════════════════════════════\\n` +\n`RULE 3 — ADVANCED ANIMATION QUALITY:\\n` +\n`═══════════════════════════════════════════════════\\n` +\n`Produce 3Blue1Brown-quality animations. Use ALL of the following:\\n` +\n`\\n` +\n`COLOR CODING (strict standard):\\n` +\n`  RED / #FF4444:    forces, important labels\\n` +\n`  BLUE / #4488FF:   velocity, motion vectors\\n` +\n`  GREEN / #44FF88:  results, final answers\\n` +\n`  YELLOW / #FFFF44: equations being highlighted\\n` +\n`  ORANGE / #FF8844: acceleration, energy\\n` +\n`  WHITE:            general text, titles\\n` +\n`  GRAY:             background grid, secondary elements\\n` +\n`\\n` +\n`REQUIRED ANIMATION TECHNIQUES (use at least 3 per scene):\\n` +\n`  1. EQUATION BUILD: Show equation letter by letter using TransformMatchingShapes\\n` +\n`     eq0=MathTex(r\"F\").move_to(ORIGIN)\\n` +\n`     eq1=MathTex(r\"F =\").move_to(ORIGIN)\\n` +\n`     eq2=MathTex(r\"F = ma\").move_to(ORIGIN)\\n` +\n`     self.play(Write(eq0,run_time=1.0))\\n` +\n`     self.play(TransformMatchingShapes(eq0,eq1,run_time=1.5))\\n` +\n`     self.play(TransformMatchingShapes(eq1,eq2,run_time=1.5))\\n` +\n`\\n` +\n`  2. MOVING OBJECT: Use .animate chain to show physics in action\\n` +\n`     ball=Circle(radius=0.3,color=BLUE,fill_opacity=0.8).move_to(LEFT*4)\\n` +\n`     self.play(Create(ball,run_time=0.8))\\n` +\n`     self.play(ball.animate.move_to(RIGHT*4),run_time=2.0)\\n` +\n`\\n` +\n`  3. VECTOR FIELD: Show multiple arrows with color and labels\\n` +\n`     v1=Arrow(ORIGIN,RIGHT*2+UP*1,color=RED,buff=0)\\n` +\n`     lbl1=MathTex(r\"\\\\vec{F}\",color=RED,font_size=32).next_to(v1.get_end(),UP,buff=0.2)\\n` +\n`     self.play(GrowArrow(v1,run_time=1.5),Write(lbl1,run_time=1.0))\\n` +\n`\\n` +\n`  4. SMOOTH GRAPH: Axes + plot + moving dot with ValueTracker\\n` +\n`     axes=Axes(x_range=[0,5,1],y_range=[0,10,2],x_length=5,y_length=3)\\n` +\n`     axes.move_to(RIGHT*2+DOWN*0.5)\\n` +\n`     graph=axes.plot(lambda x:2*x,color=BLUE,x_range=[0,5])\\n` +\n`     t=ValueTracker(0)\\n` +\n`     dot=always_redraw(lambda:Dot(axes.c2p(t.get_value(),2*t.get_value()),color=YELLOW,radius=0.12))\\n` +\n`     self.play(Create(axes,run_time=1.5),Create(graph,run_time=1.5))\\n` +\n`     self.add(dot)\\n` +\n`     self.play(t.animate.set_value(5),run_time=3.0)\\n` +\n`\\n` +\n`  5. HIGHLIGHT PULSE: Use Indicate or Circumscribe to draw attention\\n` +\n`     self.play(Indicate(key_equation,color=YELLOW,scale_factor=1.2,run_time=1.0))\\n` +\n`     self.play(Circumscribe(result,color=GREEN,run_time=1.5))\\n` +\n`\\n` +\n`  6. SPLIT SCREEN: Two diagrams side-by-side with a DashedLine divider\\n` +\n`     divider=DashedLine(UP*3,DOWN*3,color=GRAY,dash_length=0.2)\\n` +\n`     self.play(Create(divider,run_time=0.5))\\n` +\n`     # left content at LEFT*3, right content at RIGHT*3\\n` +\n`\\n` +\n`  7. COLOR CHANGE: Use .animate.set_color() to transition object colors\\n` +\n`     self.play(equation.animate.set_color(GREEN),run_time=1.0)\\n` +\n`\\n` +\n`  8. STAGGERED ENTRY with LaggedStart (ALWAYS use this for lists / multi-part diagrams):\\n` +\n`     lines = VGroup(\\n` +\n`       Text(\"Line 1\", font_size=30, color=WHITE),\\n` +\n`       Text(\"Line 2\", font_size=30, color=BLUE),\\n` +\n`       Text(\"Line 3\", font_size=30, color=GREEN)\\n` +\n`     ).arrange(DOWN, aligned_edge=LEFT, buff=0.4).move_to(LEFT*2)\\n` +\n`     self.play(LaggedStart(*[FadeIn(l, shift=RIGHT*0.4) for l in lines], lag_ratio=0.4, run_time=2.0))\\n` +\n`     # For equations: LaggedStart(*[Write(eq) for eq in eq_group], lag_ratio=0.5, run_time=2.5)\\n` +\n`\\n` +\n`  9. BACKGROUND GRID — add to EVERY scene for professional depth (MANDATORY):\\n` +\n`     grid = NumberPlane(\\n` +\n`       background_line_style={\"stroke_color\": BLUE_E, \"stroke_width\": 1, \"stroke_opacity\": 0.12},\\n` +\n`       axis_config={\"stroke_opacity\": 0}\\n` +\n`     )\\n` +\n`     self.add(grid)  # add() is OK ONLY for background/non-animated elements\\n` +\n`\\n` +\n`  10. HIGHLIGHT BOX — SurroundingRectangle to frame final results:\\n` +\n`      box = SurroundingRectangle(final_eq, color=YELLOW, buff=0.18, corner_radius=0.1, stroke_width=2)\\n` +\n`      self.play(Create(box, run_time=1.0))\\n` +\n`      self.wait(1.5)\\n` +\n`      self.play(Flash(box, color=YELLOW, flash_radius=0.5, run_time=0.6))\\n` +\n`\\n` +\n`  11. BRACE ANNOTATION — label important measurements or dimensions:\\n` +\n`      brace = Brace(obj, direction=DOWN, color=GRAY)\\n` +\n`      brace_lbl = brace.get_text(\"10 meters\", font_size=26).set_color(GRAY)\\n` +\n`      self.play(GrowFromCenter(brace, run_time=0.8), FadeIn(brace_lbl, run_time=0.8))\\n` +\n`\\n` +\n`  12. SCENE OPENING — every scene must start with a bold animated title that fades out:\\n` +\n`      title = Text(\"Scene Title Here\", font_size=40, weight=BOLD, gradient=(BLUE, PURPLE))\\n` +\n`      title.to_edge(UP).shift(DOWN*0.2)\\n` +\n`      underline = Line(title.get_left(), title.get_right(), color=BLUE, stroke_width=2)\\n` +\n`      underline.next_to(title, DOWN, buff=0.1)\\n` +\n`      self.play(Write(title, run_time=1.2), Create(underline, run_time=0.6))\\n` +\n`      self.wait(1.0)\\n` +\n`      # IMPORTANT: title and underline MUST fade out — use: self.play(FadeOut(title, run_time=0.6), FadeOut(underline, run_time=0.6)) then self.wait(0.3) — after this the full screen is free for main content, NO title zone objects remain on screen\\n` +\n`\\n` +\n`═══════════════════════════════════════════════════\\n` +\n`STRICT MANIM v0.20.0 API RULES:\\n` +\n`═══════════════════════════════════════════════════\\n` +\n`ONLY IMPORT: from manim import *\\n` +\n`STRING QUOTES: Use SINGLE QUOTES for ALL Python string literals in the code.\\n` +\n`  CORRECT:  Text('Newton Laws of Motion')\\n` +\n`  CORRECT:  Text(\"Newton's Laws\")  ← only use double quotes when string contains apostrophe\\n` +\n`  WRONG:    Text(\"Newton Laws of Motion\")  ← avoid double quotes unnecessarily\\n` +\n`DICT ARGS: Use dict() function, NEVER brace syntax for keyword dicts passed to Manim:\\n` +\n`  CORRECT:  background_line_style=dict(stroke_color=BLUE_E, stroke_width=1, stroke_opacity=0.12)\\n` +\n`  WRONG:    background_line_style={\"stroke_color\": BLUE_E}  ← double quotes in braces break JSON\\n` +\n`DO NOT USE: SVGMobject, ImageMobject, ThreeDScene, ThreeDAxes\\n` +\n`DO NOT USE: NumberTracker → use ValueTracker instead\\n` +\n`DO NOT USE: axes.get_graph() → use axes.plot(lambda x: ...) instead\\n` +\n`DO NOT USE: ShowCreation → use Create instead\\n` +\n`DO NOT USE: self.add() for non-lambda objects\\n` +\n`MathTex strings: use raw strings r\"...\" and double-backslash for LaTeX: r\"\\\\frac{a}{b}\"\\n` +\n`Text font_size: max 42 for titles, max 32 for body text, max 26 for labels\\n` +\n`\\n` +\n`═══════════════════════════════════════════════════\\n` +\n`OUTPUT FORMAT:\\n` +\n`═══════════════════════════════════════════════════\\n` +\n`Return ONLY a raw JSON object — no markdown fences, no explanation:\\n` +\n`{\\n` +\n`  \"scenes\": [\\n` +\n`    { \"scene_number\": 1, \"class_name\": \"OpeningScene\",     \"code\": \"from manim import *\\\\nclass OpeningScene(Scene):\\\\n    def construct(self):\\\\n        ...\" },\\n` +\n`    { \"scene_number\": 2, \"class_name\": \"CoreConceptScene\", \"code\": \"...\" },\\n` +\n`    { \"scene_number\": 3, \"class_name\": \"SummaryScene\",     \"code\": \"...\" }\\n` +\n`  ]\\n` +\n`}\\n` +\n`ESCAPE RULE: all newlines inside code strings must be \\\\\\\\n (backslash-n) within the JSON`;\n\nreturn [{\n  json: {\n    ...data,\n    gemini_manim_request: {\n      contents: [{ parts: [{ text: prompt }] }],\n      generationConfig: {\n        maxOutputTokens: 32768,\n        temperature: 0.7,\n        responseMimeType: 'application/json',\n        thinkingConfig: { thinkingBudget: 0 }\n      }\n    }\n  }\n}];"
+        "jsCode": "const data = $input.first().json;\nreturn [{ json: {\n  job_id: data.job_id,\n  topic: data.topic,\n  title: data.title,\n  hashtags: data.hashtags,\n  narration: data.narration,\n  clip_prompts: data.clip_prompts,\n  audio_path: data.audio_path,\n  subs_path: data.subs_path,\n  audio_duration: data.audio_duration,\n  subtitle_chunks: data.subtitle_chunks,\n  sheet_row: data.sheet_row,\n  start_time: data.start_time\n} }];"
       },
-      "id": "s1-n07",
-      "name": "Build Manim Prompt",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1560,
-        300
-      ]
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "={{ 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + $env.GOOGLE_AI_API_KEY }}",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            }
-          ]
-        },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify($json.gemini_manim_request) }}",
-        "options": {
-          "timeout": 120000
-        }
-      },
-      "id": "s1-n08",
-      "name": "Gemini Generate Manim",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4,
-      "position": [
-        1780,
-        300
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "// Parse Manim code from Gemini and merge with audio data from Generate Scene Audio.\nconst geminiResponse = $input.first().json;\nconst audioData      = $('Generate Scene Audio').first().json;\n\nif (!geminiResponse.candidates || !geminiResponse.candidates[0] || !geminiResponse.candidates[0].content) {\n  throw new Error('Gemini Manim response empty: ' + JSON.stringify(geminiResponse).slice(0, 300));\n}\n\nlet rawText = geminiResponse.candidates[0].content.parts[0].text.trim();\nrawText = rawText.replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```\\s*$/i, '').trim();\n\n// ─── Attempt 1: standard JSON.parse ─────────────────────────────────────────\nlet parsed = null;\ntry { parsed = JSON.parse(rawText); } catch(e1) {}\n\n// ─── Attempt 2: repairJson (fixes literal newlines/tabs in strings) ──────────\nif (!parsed) {\n  function repairJson(text) {\n    let out = '', inStr = false, i = 0;\n    while (i < text.length) {\n      const c = text[i];\n      if (!inStr) {\n        out += c;\n        if (c === '\"') inStr = true;\n        i++;\n      } else if (c === '\\\\') {\n        const n1 = text[i+1] || '';\n        const n2 = text[i+2] || '';\n        if (n1 === '\\\\' && n2 === '\"') {\n          // \\\\\" pattern: treat as escaped quote, keep string open\n          out += '\\\\\"'; i += 3;\n        } else if (n1 === '\\\\') {\n          out += '\\\\\\\\'; i += 2;\n        } else if (n1 === '\"' || n1 === 'n' || n1 === 't' || n1 === 'r' || n1 === '/') {\n          out += c + n1; i += 2;\n        } else {\n          out += '\\\\\\\\'; i++; // escape lone backslash\n        }\n      } else if (c === '\"') {\n        out += '\"'; inStr = false; i++;\n      } else if (c === '\\n') {\n        out += '\\\\n'; i++;\n      } else if (c === '\\r') {\n        out += '\\\\r'; i++;\n      } else if (c === '\\t') {\n        out += '\\\\t'; i++;\n      } else {\n        out += c; i++;\n      }\n    }\n    return out;\n  }\n  const start = rawText.indexOf('{'), end = rawText.lastIndexOf('}');\n  const block = (start !== -1 && end !== -1) ? rawText.slice(start, end + 1) : rawText;\n  try { parsed = JSON.parse(repairJson(block)); } catch(e2) {}\n}\n\n// ─── Attempt 3: direct character-by-character code block extractor ───────────\n// Handles any remaining escaping issues by walking the raw text directly.\nif (!parsed) {\n  console.warn('JSON.parse and repairJson both failed — using direct extractor');\n  function extractBlocks(text) {\n    const blocks = [];\n    let pos = 0;\n    while (pos < text.length) {\n      // Find next \\\"code\\\" key\n      const keyIdx = text.indexOf('\"code\"', pos);\n      if (keyIdx === -1) break;\n      // Skip to colon then to opening quote\n      let ci = keyIdx + 6;\n      while (ci < text.length && text[ci] !== ':') ci++;\n      ci++; // skip ':'\n      while (ci < text.length && (text[ci] === ' ' || text[ci] === '\\n' || text[ci] === '\\r' || text[ci] === '\\t')) ci++;\n      if (text[ci] !== '\"') { pos = keyIdx + 6; continue; }\n      ci++; // skip opening quote\n\n      // Read string value\n      let code = '';\n      let i = ci;\n      while (i < text.length) {\n        const c = text[i];\n        if (c === '\\\\') {\n          const n1 = text[i+1] || '';\n          const n2 = text[i+2] || '';\n          if (n1 === 'n')  { code += '\\n'; i += 2; }\n          else if (n1 === 't')  { code += '\\t'; i += 2; }\n          else if (n1 === 'r')  { code += '\\r'; i += 2; }\n          else if (n1 === '\"') { code += '\"';  i += 2; }\n          else if (n1 === '\\\\' && n2 === '\"') { code += '\"'; i += 3; } // \\\\\" → \"\n          else if (n1 === '\\\\') { code += '\\\\'; i += 2; }\n          else { code += n1; i += 2; }\n        } else if (c === '\"') {\n          i++; break; // end of string\n        } else if (c === '\\n') {\n          code += '\\n'; i++; // literal newline inside string\n        } else {\n          code += c; i++;\n        }\n      }\n      if (code.trim().length > 20) blocks.push({ code, endPos: i });\n      pos = i;\n    }\n    return blocks;\n  }\n\n  // Also extract class_names and scene_numbers by order\n  const blocks = extractBlocks(rawText);\n  if (blocks.length === 0) throw new Error('Could not extract any code blocks from Gemini response. Raw: ' + rawText.slice(0, 500));\n\n  const classMatches = [...rawText.matchAll(/\"class_name\"\\s*:\\s*\"([^\"]+)\"/g)].map(m => m[1]);\n  const numMatches   = [...rawText.matchAll(/\"scene_number\"\\s*:\\s*(\\d+)/g)].map(m => parseInt(m[1]));\n\n  parsed = {\n    scenes: blocks.map((b, idx) => ({\n      scene_number: numMatches[idx] || (idx + 1),\n      class_name:   classMatches[idx] || ('Scene' + (idx + 1)),\n      code:         b.code\n    }))\n  };\n  console.log('Extracted ' + parsed.scenes.length + ' code blocks via direct extractor');\n}\n\nif (!Array.isArray(parsed.scenes) || parsed.scenes.length === 0)\n  throw new Error('Manim response missing scenes array');\n\n// Merge Manim code into the existing scenes (which have audio paths + durations)\nconst mergedScenes = audioData.scenes.map(existingScene => {\n  const manim = parsed.scenes.find(\n    m => m.class_name === existingScene.class_name || m.scene_number === existingScene.scene_number\n  );\n  if (!manim || !manim.code) throw new Error('No Manim code for scene: ' + existingScene.class_name);\n  return { ...existingScene, code: manim.code };\n});\n\nconsole.log('Manim code merged for: ' + mergedScenes.map(s => s.class_name).join(', '));\n\nreturn [{ json: { ...audioData, scenes: mergedScenes } }];"
-      },
-      "id": "s1-n09",
-      "name": "Parse Manim Response",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        2000,
-        300
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "const data=$input.first().json;\nconst cfg=$(\"Set Job Config\").first().json;\nreturn[{json:{job_id:data.job_id,scenes:data.scenes,scene_count:data.scenes.length,start_time:data.start_time,sheet_row:cfg.sheet_row||null}}];"
-      },
-      "id": "s1-n10",
+      "id": "node11",
       "name": "Build Stage 2 Payload",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        2220,
-        300
-      ]
+      "position": [1980, 0]
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "http://localhost:5678/webhook/stage2-manim",
+        "url": "http://localhost:5678/webhook/stage2-video",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ job_id: $json.job_id, scenes: $json.scenes, start_time: $json.start_time }) }}",
+        "jsonBody": "={{ JSON.stringify($json) }}",
         "options": {
-          "timeout": 30000,
-          "retry": {
-            "enabled": true,
-            "maxTries": 3,
-            "waitBetweenTries": 5000
-          }
+          "timeout": 30000
         }
       },
-      "id": "s1-n16",
+      "id": "node12",
       "name": "POST to Stage 2",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
-      "position": [
-        2440,
-        300
-      ]
-    },
-    {
-      "parameters": {
-        "method": "GET",
-        "url": "https://sheets.googleapis.com/v4/spreadsheets/17sx-y_QDWYHFPR4sfpx9pPd8YHFx-aX8jh8tLtZXELQ/values/%F0%9F%8E%AC%20Dashboard!A4:O",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "googleDriveOAuth2Api",
-        "options": {
-          "timeout": 10000
-        }
-      },
-      "id": "s1-sheet01",
-      "name": "Read Topic From Sheet",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4,
-      "position": [
-        460,
-        160
-      ],
-      "credentials": {
-        "googleDriveOAuth2Api": {
-          "id": "QUGEpurbhr31d8QZ",
-          "name": "Google Drive account 3"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "jsCode": "const res = $input.first().json;\nconst rows = res.values || [];\nlet found = null;\nfor (let i = 0; i < rows.length; i++) {\n  const s = (rows[i][4] || '').toString().toUpperCase().trim();\n  if (s === 'PENDING') { found = { idx: i, row: rows[i] }; break; }\n}\nif (!found) throw new Error('No PENDING topic in Dashboard tab. Set STATUS (col E) = PENDING for a row.');\nconst sheetRow   = found.idx + 4;\nconst topic      = (found.row[1] || '').trim();\nconst difficulty = (found.row[2] || 'beginner').trim();\nconst durationMin = parseFloat(found.row[3]) || 1;\nif (!topic) throw new Error('PENDING row found but Topic (col B) is empty.');\nconst jobId = (found.row[0] || '').trim() || ('PHY-' + Date.now().toString().slice(-8));\nconsole.log('Row ' + sheetRow + ' | ' + jobId + ' | ' + topic + ' | ' + durationMin + 'min');\nreturn [{ json: { job_id: jobId, topic: topic, difficulty: difficulty, duration_min: durationMin, sheet_row: sheetRow, source: 'google_sheet' } }];"
-      },
-      "id": "s1-sheet02",
-      "name": "Pick PENDING Topic",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        680,
-        160
-      ]
-    },
-    {
-      "parameters": {
-        "method": "PUT",
-        "url": "={{ 'https://sheets.googleapis.com/v4/spreadsheets/17sx-y_QDWYHFPR4sfpx9pPd8YHFx-aX8jh8tLtZXELQ/values/%F0%9F%8E%AC%20Dashboard!E' + $json.sheet_row + '?valueInputOption=USER_ENTERED' }}",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "googleDriveOAuth2Api",
-        "sendBody": true,
-        "contentType": "json",
-        "body": "={ \"majorDimension\": \"ROWS\", \"values\": [[\"IN_PROGRESS\"]] }",
-        "options": {
-          "timeout": 10000
-        }
-      },
-      "id": "s1-sheet03",
-      "name": "Mark IN_PROGRESS in Sheet",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4,
-      "continueOnFail": true,
-      "position": [
-        900,
-        160
-      ],
-      "credentials": {
-        "googleDriveOAuth2Api": {
-          "id": "QUGEpurbhr31d8QZ",
-          "name": "Google Drive account 3"
-        }
-      }
+      "position": [2200, 0]
     },
     {
       "parameters": {
@@ -284,15 +188,12 @@
           "timeout": 10000
         }
       },
-      "id": "s1-notify01",
+      "id": "node13",
       "name": "Notify Stage1 Done",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "continueOnFail": true,
-      "position": [
-        2660,
-        300
-      ],
+      "position": [2420, 0],
       "credentials": {
         "googleDriveOAuth2Api": {
           "id": "QUGEpurbhr31d8QZ",
@@ -394,47 +295,14 @@
       "main": [
         [
           {
-            "node": "Generate Scene Audio",
+            "node": "Generate Audio",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Generate Scene Audio": {
-      "main": [
-        [
-          {
-            "node": "Build Manim Prompt",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Build Manim Prompt": {
-      "main": [
-        [
-          {
-            "node": "Gemini Generate Manim",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Gemini Generate Manim": {
-      "main": [
-        [
-          {
-            "node": "Parse Manim Response",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Parse Manim Response": {
+    "Generate Audio": {
       "main": [
         [
           {
@@ -474,6 +342,7 @@
     "saveManualExecutions": true
   },
   "id": "physics-stage1-pipeline",
+  "name": "Physics Channel - Stage 1 - Content Generation",
   "tags": [
     {
       "name": "physics-channel"

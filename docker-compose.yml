@@ -32,8 +32,8 @@ services:
   # ─────────────────────────────────────────────────────────────
   # n8n  –  automation engine / pipeline brain
   # Custom image adds Docker CLI so Execute Command nodes can
-  # run:  docker exec manim-runner manim ...
-  #       docker exec ffmpeg-runner ffmpeg ...
+  # run:  docker exec ffmpeg-runner ffmpeg ...
+  #       docker exec ffmpeg-runner curl ...
   # ─────────────────────────────────────────────────────────────
   n8n:
     build:
@@ -67,7 +67,7 @@ services:
       - NODE_FUNCTION_ALLOW_BUILTIN=child_process,fs,path,os,https,http
       - N8N_RUNNERS_HEARTBEAT_INTERVAL=600
       - N8N_RUNNERS_TASK_TIMEOUT=3600
-      - N8N_FILES_ALLOWED_PATHS=/data/manim/combined,/data/manim/renders,/data/manim/scripts,/data/ffmpeg/output,/data/uploads
+      - N8N_FILES_ALLOWED_PATHS=/data/ffmpeg/input,/data/ffmpeg/output,/data/uploads
       - N8N_USER_FOLDER=/home/node/.n8n
       # PostgreSQL connection
       - DB_TYPE=postgresdb
@@ -88,43 +88,17 @@ services:
       - HEYGEN_API_KEY=${HEYGEN_API_KEY}
       - HEYGEN_AVATAR_ID=${HEYGEN_AVATAR_ID}
       - YOUTUBE_CHANNEL_ID=${YOUTUBE_CHANNEL_ID}
+      - WAVESPEED_API_KEY=${WAVESPEED_API_KEY}
     volumes:
       # n8n data (workflows, credentials, execution history)
       - ./n8n:/home/node/.n8n
       # Docker socket – lets n8n exec into other containers
       - /var/run/docker.sock:/var/run/docker.sock
-      # Shared volumes so n8n can read/write files for manim and ffmpeg
-      - ./manim/scripts:/data/manim/scripts
-      - ./manim/renders:/data/manim/renders
-      - ./manim/combined:/data/manim/combined
+      # Shared volumes so n8n can read/write files for ffmpeg
       - ./ffmpeg/input:/data/ffmpeg/input
       - ./ffmpeg/output:/data/ffmpeg/output
       - ./uploads:/data/uploads
       - ./config:/data/config
-
-  # ─────────────────────────────────────────────────────────────
-  # manim-runner  –  Python 3.11 + Manim Community Edition
-  # n8n writes .py files to the shared scripts volume,
-  # then execs into this container to run manim rendering.
-  # ─────────────────────────────────────────────────────────────
-  manim-runner:
-    build:
-      context: ./manim
-      dockerfile: Dockerfile
-    container_name: manim-runner
-    restart: always
-    networks:
-      - pipeline-network
-    env_file:
-      - .env
-    environment:
-      - MANIM_SCRIPTS_DIR=${MANIM_SCRIPTS_DIR}
-      - MANIM_RENDERS_DIR=${MANIM_RENDERS_DIR}
-    volumes:
-      - ./manim/scripts:/manim/scripts
-      - ./manim/renders:/manim/renders
-      - ./manim/combined:/manim/combined
-    command: tail -f /dev/null
 
   # ─────────────────────────────────────────────────────────────
   # ffmpeg-runner  –  Ubuntu 22.04 + FFmpeg + curl/wget

@@ -1,143 +1,65 @@
 {
-  "name": "Physics Channel - Stage 2 - Manim Rendering",
+  "name": "Physics Channel - Stage 2 - Video Generation",
   "nodes": [
-    {
-      "parameters": {},
-      "id": "s2-manual",
-      "name": "Manual Trigger",
-      "type": "n8n-nodes-base.manualTrigger",
-      "typeVersion": 1,
-      "position": [
-        240,
-        160
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "return [{\n  json: {\n    body: {\n      job_id: 'test-job-' + Date.now(),\n      scenes: [{\n        scene_number: 1,\n        class_name: 'TestScene',\n        code: 'from manim import *\\nclass TestScene(Scene):\\n    def construct(self):\\n        t = Text(\"Hello Physics!\", font_size=48)\\n        self.play(Write(t))\\n        self.wait(2)\\n        self.play(FadeOut(t))'\n      }],\n      elevenlabs_audio_url: 'https://example.com/test-audio.mp3',\n      heygen_avatar_url: null\n    }\n  }\n}];"
-      },
-      "id": "s2-manual-data",
-      "name": "Stage 2 Test Data",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        460,
-        160
-      ]
-    },
     {
       "parameters": {
         "httpMethod": "POST",
-        "path": "stage2-manim",
+        "path": "stage2-video",
         "responseMode": "onReceived",
         "responseData": "firstEntryJson",
         "options": {}
       },
-      "id": "s2-n01",
+      "id": "node1",
       "name": "Stage 2 Webhook",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "position": [
-        240,
-        300
-      ],
-      "webhookId": "physics-stage2-manim"
+      "position": [0, 0],
+      "webhookId": "physics-stage2-video"
     },
     {
       "parameters": {
-        "jsCode": "const raw=$input.first().json;\nconst body=(raw.body!==undefined)?raw.body:raw;\nif(!body.job_id)throw new Error(\"Payload missing: job_id\");\nif(!Array.isArray(body.scenes)||body.scenes.length===0)throw new Error(\"Payload missing or empty: scenes\");\nreturn[{json:{job_id:body.job_id,scenes:body.scenes,start_time:body.start_time||Date.now(),total_scenes:body.scenes.length,sheet_row:body.sheet_row||null}}];"
+        "jsCode": "const raw = $input.first().json;\nconst body = (raw.body !== undefined) ? raw.body : raw;\nif (!body.job_id) throw new Error('Payload missing: job_id');\nif (!Array.isArray(body.clip_prompts) || body.clip_prompts.length !== 3) throw new Error('Payload must have clip_prompts array of 3');\nreturn [{ json: {\n  job_id: body.job_id,\n  topic: body.topic,\n  title: body.title,\n  hashtags: body.hashtags,\n  narration: body.narration,\n  clip_prompts: body.clip_prompts,\n  audio_path: body.audio_path,\n  subs_path: body.subs_path,\n  audio_duration: body.audio_duration,\n  subtitle_chunks: body.subtitle_chunks,\n  sheet_row: body.sheet_row || null,\n  start_time: body.start_time || Date.now()\n} }];"
       },
-      "id": "s2-n02",
+      "id": "node2",
       "name": "Extract Payload",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        460,
-        300
-      ]
+      "position": [220, 0]
     },
     {
       "parameters": {
-        "jsCode": "// Render each scene then immediately mix with its own audio.\n// This gives perfect sync: each scene's narration plays during that exact scene.\nconst { execSync } = require('child_process');\nconst fs   = require('fs');\nconst path = require('path');\n\nconst data   = $input.first().json;\nconst job_id = data.job_id;\nconst scenes = data.scenes;\n\nconst mixedPaths = [];  // final per-scene mixed video paths (inside container)\nconst failed     = [];\n\nfor (const scene of scenes) {\n  const class_name     = scene.class_name;\n  const code           = scene.code;\n  const audioCont      = scene.audio_path_cont;  // already saved by Stage 1\n  const audioN8n       = scene.audio_path_n8n;\n  const scriptDir      = '/data/manim/scripts';\n  const scriptPath     = path.join(scriptDir, class_name + '.py');\n\n  // 1. Sanitize code â€” fix common Gemini-generated Manim errors before writing\n  function sanitize(src) {\n    // BROWN / DARK_BROWN â€” not defined in Manim palette\n    src = src.replace(/\\bBROWN\\b/g, '\"#A0522D\"');\n    src = src.replace(/\\bDARK_BROWN\\b/g, '\"#6B3A2A\"');\n    // Sphere â€” 3D only; replace with Circle (extract radius if present)\n    src = src.replace(/\\bSphere\\s*\\(([^)]{0,200})\\)/g, (m, args) => {\n      const rm = args.match(/radius\\s*=\\s*([\\d.]+)/);\n      const r  = rm ? rm[1] : '1.5';\n      return `Circle(radius=${r}, color=BLUE_E, fill_opacity=0.8)`;\n    });\n    // uv_resolution (Sphere param) â†’ remove if still present\n    src = src.replace(/,?\\s*uv_resolution\\s*=\\s*\\([^)]+\\)/g, '');\n    // Star(num_points=N â†’ Star(n=N\n    src = src.replace(/\\bStar\\s*\\(\\s*num_points\\s*=/g, 'Star(n=');\n    // Invalid rate functions â†’ smooth\n    src = src.replace(/\\bease_out_quad\\b/g, 'smooth');\n    src = src.replace(/\\bease_in_quad\\b/g, 'smooth');\n    src = src.replace(/\\bease_out_sine\\b/g, 'smooth');\n    src = src.replace(/\\bease_in_sine\\b/g, 'smooth');\n    src = src.replace(/\\bease_in_out_sine\\b/g, 'smooth');\n    // Cube (3D) â†’ RoundedRectangle\n    src = src.replace(/\\bCube\\s*\\(([^)]{0,200})\\)/g, (m, args) => {\n      const sm = args.match(/side_length\\s*=\\s*([\\d.]+)/);\n      const s  = sm ? sm[1] : '1.0';\n      return `RoundedRectangle(width=${s}, height=${s}, corner_radius=0.1, fill_opacity=0.8)`;\n    });\n    return src;\n  }\n  const sanitizedCode = sanitize(code);\n\n  // Write Python script\n  if (!fs.existsSync(scriptDir)) fs.mkdirSync(scriptDir, { recursive: true });\n  const cleanCode = sanitizedCode.split(String.fromCharCode(92) + 'n').join(String.fromCharCode(10));\n  fs.writeFileSync(scriptPath, cleanCode, 'utf-8');\n\n  // 2. Render with Manim (up to 3 attempts)\n  let renderPath    = null;\n  let renderSuccess = false;\n  let renderStdout  = '';\n\n  for (let attempt = 0; attempt < 3; attempt++) {\n    let stdout = '', exitCode = 0;\n    try {\n      stdout = execSync(\n        `docker exec manim-runner bash -c 'timeout 600 manim -qh /manim/scripts/${class_name}.py ${class_name} --media_dir /manim/renders/${job_id} 2>&1; EXIT=$?; find /manim/renders/${job_id} -name \"${class_name}.mp4\" -type f | tail -1; exit $EXIT'`,\n        { encoding: 'utf-8', timeout: 620000 }\n      );\n    } catch(err) {\n      stdout   = (err.stdout || err.message || '').toString();\n      exitCode = err.status || 1;\n    }\n    const lines   = stdout.trim().split('\\n').map(l => l.trim()).filter(Boolean);\n    const lastLine = lines[lines.length - 1] || '';\n    renderStdout  = stdout.slice(-400);\n    if (lastLine.endsWith('.mp4') && exitCode === 0) {\n      renderPath    = lastLine;\n      renderSuccess = true;\n      break;\n    }\n    if (attempt < 2) try { execSync('sleep 5', { timeout: 10000 }); } catch(e) {}\n  }\n\n  if (!renderSuccess) {\n    const errSnippet = renderStdout.slice(-800);\n    failed.push(class_name + ' | ERROR: ' + errSnippet);\n    console.warn('Scene FAILED: ' + class_name + '\\n--- Manim output (last 800 chars) ---\\n' + errSnippet);\n    continue;\n  }\n\n  // 3. Get actual video duration\n  let videoDuration = 0;\n  try {\n    const vDurOut = execSync(\n      `docker exec manim-runner bash -c 'ffprobe -v error -show_entries format=duration -of csv=p=0 \"${renderPath}\"'`,\n      { encoding: 'utf-8', timeout: 15000 }\n    );\n    videoDuration = parseFloat(vDurOut.trim()) || 0;\n  } catch(e) { console.warn('video ffprobe failed: ' + e.message); }\n\n  // 4. Get exact audio duration (passed from Stage 1, or measure it now)\n  let audioDuration = scene.audio_duration_seconds || 0;\n  if (!audioDuration && audioCont && fs.existsSync(audioN8n)) {\n    try {\n      const aDurOut = execSync(\n        `docker exec manim-runner bash -c 'ffprobe -v error -show_entries format=duration -of csv=p=0 \"${audioCont}\"'`,\n        { encoding: 'utf-8', timeout: 15000 }\n      );\n      audioDuration = parseFloat(aDurOut.trim()) || 0;\n    } catch(e) { console.warn('audio ffprobe failed: ' + e.message); }\n  }\n\n  console.log('Scene ' + scene.scene_number + ': video=' + videoDuration.toFixed(2) + 's audio=' + audioDuration.toFixed(2) + 's');\n\n  // 5. Pad video to match audio duration (freeze last frame if video is shorter)\n  let finalRenderPath = renderPath;\n  if (audioDuration > 0 && videoDuration > 0 && videoDuration < audioDuration - 0.3) {\n    const padSec = (audioDuration - videoDuration + 0.1).toFixed(2);\n    const paddedPath = `/manim/renders/${job_id}/padded_${class_name}.mp4`;\n    let padOut = '';\n    try {\n      padOut = execSync(\n        `docker exec manim-runner bash -c 'ffmpeg -y -i \"${renderPath}\" -vf \"tpad=stop_mode=clone:stop_duration=${padSec}\" -an \"${paddedPath}\" 2>&1 && echo \"PAD_OK\"'`,\n        { encoding: 'utf-8', timeout: 120000 }\n      );\n    } catch(e) { padOut = (e.stdout || e.message || '').toString(); }\n    if (padOut.includes('PAD_OK')) {\n      console.log('Padded scene ' + scene.scene_number + ' by +' + padSec + 's â†’ now matches audio');\n      finalRenderPath = paddedPath;\n    } else {\n      console.warn('Padding failed, using original. ' + padOut.slice(-150));\n    }\n  } else if (audioDuration > 0 && videoDuration > audioDuration + 0.5) {\n    // Trim if video is longer than audio\n    const trimPath = `/manim/renders/${job_id}/trimmed_${class_name}.mp4`;\n    let trimOut = '';\n    try {\n      trimOut = execSync(\n        `docker exec manim-runner bash -c 'ffmpeg -y -i \"${renderPath}\" -t ${audioDuration.toFixed(3)} -c copy \"${trimPath}\" 2>&1 && echo \"TRIM_OK\"'`,\n        { encoding: 'utf-8', timeout: 60000 }\n      );\n    } catch(e) { trimOut = (e.stdout || e.message || '').toString(); }\n    if (trimOut.includes('TRIM_OK')) {\n      console.log('Trimmed scene ' + scene.scene_number + ' to ' + audioDuration.toFixed(2) + 's');\n      finalRenderPath = trimPath;\n    }\n  }\n\n  // 6. Mix scene video + audio, locked to exact audio duration\n  const mixedCont = `/manim/combined/${job_id}_scene${scene.scene_number}_mixed.mp4`;\n  const mixedN8n  = `/data/manim/combined/${job_id}_scene${scene.scene_number}_mixed.mp4`;\n\n  if (audioCont && fs.existsSync(audioN8n)) {\n    const durationFlag = audioDuration > 0 ? `-t ${audioDuration.toFixed(3)}` : '-shortest';\n    let mixOut = '';\n    try {\n      mixOut = execSync(\n        `docker exec manim-runner bash -c 'ffmpeg -y -i \"${finalRenderPath}\" -i \"${audioCont}\" -c:v libx264 -preset fast -crf 18 -c:a aac -b:a 192k ${durationFlag} \"${mixedCont}\" 2>&1 && echo \"MIX_OK\"'`,\n        { encoding: 'utf-8', timeout: 180000 }\n      );\n    } catch(err) {\n      mixOut = (err.stdout || err.message || '').toString();\n    }\n    if (!mixOut.includes('MIX_OK')) {\n      console.warn('Mix failed for scene ' + scene.scene_number + ', using silent video.\\n' + mixOut.slice(-200));\n      mixedPaths.push(finalRenderPath);\n      continue;\n    }\n    console.log('Mixed scene ' + scene.scene_number + ' â†’ ' + mixedCont);\n  } else {\n    // No audio: re-encode video only so all scenes have compatible codec for concat\n    let reencOut = '';\n    try {\n      reencOut = execSync(\n        `docker exec manim-runner bash -c 'ffmpeg -y -i \"${finalRenderPath}\" -c:v libx264 -preset fast -crf 18 -an \"${mixedCont}\" 2>&1 && echo \"REENC_OK\"'`,\n        { encoding: 'utf-8', timeout: 120000 }\n      );\n    } catch(e) { reencOut = (e.stdout || e.message || '').toString(); }\n    if (!reencOut.includes('REENC_OK')) {\n      console.warn('Re-encode failed for scene ' + scene.scene_number + ', using original.');\n      mixedPaths.push(finalRenderPath);\n      continue;\n    }\n    console.warn('No audio for scene ' + scene.scene_number + ', using video only.');\n  }\n\n  // 7. Apply fade-in (0.4s) + fade-out (0.4s) transitions for smooth scene cuts\n  const fadedCont = `/manim/combined/${job_id}_scene${scene.scene_number}_faded.mp4`;\n  const fadeDur   = 0.4;\n  const sceneLen  = audioDuration > 0 ? audioDuration : videoDuration;\n  const fadeOutAt = Math.max(0, sceneLen - fadeDur - 0.05).toFixed(3);\n  let fadeOut = '';\n  try {\n    fadeOut = execSync(\n      `docker exec manim-runner bash -c 'ffmpeg -y -i \"${mixedCont}\" ` +\n      `-vf \"fade=t=in:st=0:d=${fadeDur},fade=t=out:st=${fadeOutAt}:d=${fadeDur}\" ` +\n      `-af \"afade=t=in:st=0:d=${fadeDur},afade=t=out:st=${fadeOutAt}:d=${fadeDur}\" ` +\n      `-c:v libx264 -preset fast -crf 18 -c:a aac -b:a 192k \"${fadedCont}\" 2>&1 && echo \"FADE_OK\"'`,\n      { encoding: 'utf-8', timeout: 180000 }\n    );\n  } catch(e) { fadeOut = (e.stdout || e.message || '').toString(); }\n\n  if (fadeOut.includes('FADE_OK')) {\n    mixedPaths.push(fadedCont);\n    console.log('Scene ' + scene.scene_number + ' faded âœ“ (fade ' + fadeDur + 's in/out)');\n  } else {\n    console.warn('Fade failed for scene ' + scene.scene_number + ', using mixed.\\n' + fadeOut.slice(-120));\n    mixedPaths.push(mixedCont);\n  }\n}\n\nif (mixedPaths.length === 0) {\n  throw new Error('All scenes failed.\\n\\n' + failed.join('\\n\\n'));\n}\nif (failed.length > 0) {\n  console.warn('Skipped failed scenes: ' + failed.join(', '));\n}\n\nreturn [{\n  json: {\n    job_id,\n    successful_paths: mixedPaths,\n    failed_count:     failed.length,\n    start_time:       data.start_time,\n    total_scenes:     data.total_scenes\n  }\n}];"
+        "jsCode": "const https = require('https');\nconst data = $input.first().json;\nconst apiKey = $env.WAVESPEED_API_KEY;\nconst clipPrompts = data.clip_prompts;\n\nfunction apiCall(method, path, body) {\n  return new Promise((resolve, reject) => {\n    const buf = body ? Buffer.from(JSON.stringify(body)) : null;\n    const headers = { 'Authorization': 'Bearer ' + apiKey };\n    if (buf) { headers['Content-Type'] = 'application/json'; headers['Content-Length'] = buf.length; }\n    const req = https.request({ hostname: 'api.wavespeed.ai', path, method, headers }, (res) => {\n      const chunks = []; res.on('data', c => chunks.push(c));\n      res.on('end', () => resolve(JSON.parse(Buffer.concat(chunks).toString())));\n    });\n    req.on('error', reject);\n    if (buf) req.write(buf);\n    req.end();\n  });\n}\n\nasync function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }\n\n// Submit all clips\nconst ids = [];\nfor (let i = 0; i < clipPrompts.length; i++) {\n  const r = await apiCall('POST', '/api/v3/bytedance/seedance-1-lite/text-to-video', {\n    prompt: clipPrompts[i], aspect_ratio: '9:16', duration: 10, resolution: '720p', generate_audio: false, seed: -1\n  });\n  if (!r.data || !r.data.id) throw new Error('Wavespeed submit failed clip ' + i + ': ' + JSON.stringify(r));\n  ids.push(r.data.id);\n  console.log('Submitted clip ' + i + ': ' + r.data.id);\n}\n\n// Poll all until complete\nconst urls = new Array(ids.length).fill(null);\nconst deadline = Date.now() + 900000; // 15 min max\nwhile (urls.some(u => u === null)) {\n  if (Date.now() > deadline) throw new Error('Wavespeed polling timeout after 15 minutes');\n  await sleep(8000);\n  for (let i = 0; i < ids.length; i++) {\n    if (urls[i]) continue;\n    const r = await apiCall('GET', '/api/v3/predictions/' + ids[i], null);\n    const status = r.data && r.data.status;\n    console.log('Clip ' + i + ' status: ' + status);\n    if (status === 'completed') {\n      urls[i] = r.data.outputs && r.data.outputs[0];\n      if (!urls[i]) throw new Error('Clip ' + i + ' completed but no output URL');\n    } else if (status === 'failed') {\n      throw new Error('Clip ' + i + ' failed: ' + JSON.stringify(r));\n    }\n  }\n}\n\nconsole.log('All clips ready:', urls);\nreturn [{ json: { ...data, video_urls: urls } }];"
       },
-      "id": "s2-n03",
-      "name": "Render All Scenes",
+      "id": "node3",
+      "name": "Submit and Poll Wavespeed",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        680,
-        300
-      ]
+      "position": [440, 0]
     },
     {
       "parameters": {
-        "jsCode": "const data  = $input.first().json;\nconst paths = data.successful_paths;\nif (!paths || paths.length === 0) throw new Error('No mixed scene paths to concatenate');\n\n// paths are already mixed (video+audio per scene) â€” just concat them\nconst concatLines       = paths.map(p => `file '${p}'`).join('\\n');\nconst concatB64         = Buffer.from(concatLines).toString('base64');\nconst concatInContainer = `/manim/combined/${data.job_id}_concat.txt`;\nconst outputInContainer = `/manim/combined/${data.job_id}_final.mp4`;\nconst outputInN8n       = `/data/manim/combined/${data.job_id}_final.mp4`;\n\nreturn [{\n  json: {\n    ...data,\n    concat_b64:          concatB64,\n    concat_in_container: concatInContainer,\n    output_in_container: outputInContainer,\n    output_in_n8n:       outputInN8n,\n    output_filename:     `${data.job_id}_final.mp4`\n  }\n}];"
+        "jsCode": "const { execSync } = require('child_process');\nconst fs = require('fs');\n\nconst data = $input.first().json;\nconst jobId = data.job_id;\nconst videoUrls = data.video_urls;\nconst subtitleChunks = data.subtitle_chunks || [];\n\n// Ensure input dir exists on n8n side\nconst inputDir = '/data/ffmpeg/input';\nif (!fs.existsSync(inputDir)) fs.mkdirSync(inputDir, { recursive: true });\nconst outputDir = '/data/ffmpeg/output';\nif (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });\n\n// 1. Download 3 video clips via ffmpeg-runner container\nfor (let i = 0; i < videoUrls.length; i++) {\n  const url = videoUrls[i];\n  const outPath = '/ffmpeg/input/' + jobId + '_clip' + i + '.mp4';\n  console.log('Downloading clip ' + i + ' from ' + url);\n  let dlOut = '';\n  try {\n    dlOut = execSync(\n      'docker exec ffmpeg-runner curl -sL -o \"' + outPath + '\" \"' + url + '\" && echo \"DL_OK\"',\n      { encoding: 'utf-8', timeout: 120000 }\n    );\n  } catch(err) {\n    dlOut = (err.stdout || err.message || '').toString();\n  }\n  if (!dlOut.includes('DL_OK')) throw new Error('Download failed for clip ' + i + ': ' + dlOut.slice(-300));\n  console.log('Downloaded clip ' + i);\n}\n\n// 2. Create concat list file (written from n8n side to /data/ffmpeg/input/)\nconst concatLines = videoUrls.map((_, i) => \"file '/ffmpeg/input/\" + jobId + '_clip' + i + \".mp4'\").join('\\n');\nconst concatN8nPath = '/data/ffmpeg/input/' + jobId + '_concat.txt';\nfs.writeFileSync(concatN8nPath, concatLines, 'utf-8');\nconsole.log('Wrote concat file: ' + concatN8nPath);\n\n// 3. Generate SRT file from subtitle_chunks (written from n8n side)\nfunction toSrtTime(sec) {\n  const h = Math.floor(sec / 3600);\n  const m = Math.floor((sec % 3600) / 60);\n  const s = Math.floor(sec % 60);\n  const ms = Math.round((sec % 1) * 1000);\n  return String(h).padStart(2,'0') + ':' + String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0') + ',' + String(ms).padStart(3,'0');\n}\n\nlet srtContent = '';\nfor (let i = 0; i < subtitleChunks.length; i++) {\n  const chunk = subtitleChunks[i];\n  srtContent += (i + 1) + '\\n';\n  srtContent += toSrtTime(chunk.start) + ' --> ' + toSrtTime(chunk.end) + '\\n';\n  srtContent += chunk.text + '\\n\\n';\n}\n\nconst srtN8nPath = '/data/ffmpeg/input/' + jobId + '.srt';\nfs.writeFileSync(srtN8nPath, srtContent, 'utf-8');\nconsole.log('Wrote SRT file: ' + srtN8nPath);\n\n// 4. Run FFmpeg concat inside ffmpeg-runner container\nconst concatContPath = '/ffmpeg/input/' + jobId + '_concat.txt';\nconst concatOutContPath = '/ffmpeg/input/' + jobId + '_concat.mp4';\n\nlet concatOut = '';\ntry {\n  concatOut = execSync(\n    'docker exec ffmpeg-runner ffmpeg -y -f concat -safe 0 -i \"' + concatContPath + '\" -c copy \"' + concatOutContPath + '\" 2>&1 && echo \"CONCAT_OK\"',\n    { encoding: 'utf-8', timeout: 300000 }\n  );\n} catch(err) {\n  concatOut = (err.stdout || err.message || '').toString();\n}\nif (!concatOut.includes('CONCAT_OK')) throw new Error('FFmpeg concat failed:\\n' + concatOut.slice(-600));\nconsole.log('Concat complete');\n\n// 5. Final assembly: concat mp4 + narration audio + burned subtitles\nconst srtContPath = '/ffmpeg/input/' + jobId + '.srt';\nconst audioContPath = '/ffmpeg/input/' + jobId + '_narration.mp3';\nconst finalContPath = '/ffmpeg/output/' + jobId + '_final.mp4';\n\nconst subtitleFilter = \"subtitles='\" + srtContPath + \"':force_style='FontSize=20,Alignment=2,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,Outline=2,Bold=1'\";\n\nlet assembleOut = '';\ntry {\n  assembleOut = execSync(\n    'docker exec ffmpeg-runner ffmpeg -y -i \"' + concatOutContPath + '\" -i \"' + audioContPath + '\" -vf \"' + subtitleFilter + '\" -c:v libx264 -crf 23 -preset fast -c:a aac -b:a 128k -shortest \"' + finalContPath + '\" 2>&1 && echo \"ASSEMBLE_OK\"',\n    { encoding: 'utf-8', timeout: 600000 }\n  );\n} catch(err) {\n  assembleOut = (err.stdout || err.message || '').toString();\n}\nif (!assembleOut.includes('ASSEMBLE_OK')) throw new Error('FFmpeg final assembly failed:\\n' + assembleOut.slice(-800));\nconsole.log('Final assembly complete');\n\nconst finalN8nPath = '/data/ffmpeg/output/' + jobId + '_final.mp4';\nif (!fs.existsSync(finalN8nPath)) throw new Error('Final video not found at: ' + finalN8nPath);\n\nreturn [{ json: { ...data, output_filename: jobId + '_final.mp4', final_video_path: finalN8nPath } }];"
       },
-      "id": "s2-n09",
-      "name": "Build FFmpeg Concat",
+      "id": "node4",
+      "name": "Assemble Video",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        900,
-        300
-      ]
+      "position": [660, 0]
     },
     {
       "parameters": {
-        "jsCode": "const { execSync } = require('child_process');\nconst item = $input.first().json;\n\nlet stdout = '';\ntry {\n  stdout = execSync(\n    `docker exec manim-runner bash -c 'mkdir -p /manim/combined && echo \"${item.concat_b64}\" | base64 -d > ${item.concat_in_container} && echo \"CONCAT_FILE_OK\"'`,\n    { encoding: 'utf-8', timeout: 30000 }\n  );\n} catch (err) {\n  throw new Error('Failed to write concat file: ' + (err.stdout || err.message));\n}\n\nif (!stdout.includes('CONCAT_FILE_OK')) {\n  throw new Error('Concat file write did not confirm. Output: ' + stdout);\n}\n\nreturn [{ json: item }];"
+        "jsCode": "const fs = require('fs');\nconst item = $input.first().json;\nconst filePath = item.final_video_path;\n\nif (!fs.existsSync(filePath)) {\n  throw new Error('Final video not found at: ' + filePath);\n}\n\nconst buffer = fs.readFileSync(filePath);\n\nreturn [{\n  json: item,\n  binary: {\n    data: {\n      data: buffer.toString('base64'),\n      mimeType: 'video/mp4',\n      fileName: item.output_filename,\n      fileExtension: 'mp4'\n    }\n  }\n}];"
       },
-      "id": "s2-n10",
-      "name": "Write Concat File",
+      "id": "node5",
+      "name": "Read Final Video",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        1120,
-        300
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "const { execSync } = require('child_process');\nconst item = $input.first().json;\n\nlet stdout = '';\ntry {\n  stdout = execSync(\n    `docker exec manim-runner bash -c 'timeout 900 ffmpeg -y -f concat -safe 0 -i ${item.concat_in_container} -c copy ${item.output_in_container} 2>&1 && echo \"CONCAT_SUCCESS\" || echo \"CONCAT_FAILED\"'`,\n    { encoding: 'utf-8', timeout: 920000 }\n  );\n} catch (err) {\n  stdout = (err.stdout || err.message || '').toString();\n}\n\nif (stdout.includes('CONCAT_FAILED') || !stdout.includes('CONCAT_SUCCESS')) {\n  throw new Error('FFmpeg concat failed.\\n' + stdout.slice(-600));\n}\n\nreturn [{ json: item }];"
-      },
-      "id": "s2-n11",
-      "name": "FFmpeg Concat Scenes",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1340,
-        300
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "// Download audio from ElevenLabs/Drive URL and mix with animation using FFmpeg\nconst { execSync } = require('child_process');\nconst item = $input.first().json;\n\nconst audioUrl      = item.elevenlabs_audio_url;\nconst audioPath     = `/manim/combined/${item.job_id}_audio.mp3`;\nconst animPath      = item.output_in_container;\nconst finalPath     = `/manim/combined/${item.job_id}_final.mp4`;\nconst finalInN8n    = `/data/manim/combined/${item.job_id}_final.mp4`;\nconst finalFilename = `${item.job_id}_final.mp4`;\n\n// Step 1: download audio\nlet out = '';\ntry {\n  out = execSync(\n    `docker exec manim-runner bash -c 'curl -sL \"${audioUrl}\" -o ${audioPath} && echo \"AUDIO_OK\"'`,\n    { encoding: 'utf-8', timeout: 60000 }\n  );\n} catch(err) {\n  throw new Error('Audio download failed: ' + (err.stdout || err.message));\n}\nif (!out.includes('AUDIO_OK')) throw new Error('Audio download did not confirm. Output: ' + out);\n\n// Step 2: mix video + audio with FFmpeg\nlet mix = '';\ntry {\n  mix = execSync(\n    `docker exec manim-runner bash -c 'ffmpeg -y -i ${animPath} -i ${audioPath} -c:v copy -c:a aac -shortest ${finalPath} 2>&1 && echo \"MIX_OK\"'`,\n    { encoding: 'utf-8', timeout: 120000 }\n  );\n} catch(err) {\n  mix = (err.stdout || err.message || '').toString();\n}\nif (!mix.includes('MIX_OK')) throw new Error('FFmpeg audio mix failed:\\n' + mix.slice(-600));\n\nreturn [{\n  json: {\n    ...item,\n    output_in_n8n:   finalInN8n,\n    output_filename: finalFilename\n  }\n}];"
-      },
-      "id": "s2-n11c",
-      "name": "Mix Audio into Video",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1340,
-        500
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "const fs   = require('fs');\nconst item = $input.first().json;\nconst filePath = item.output_in_n8n;\n\nif (!fs.existsSync(filePath)) {\n  throw new Error('Final video not found at: ' + filePath);\n}\n\nconst buffer = fs.readFileSync(filePath);\n\nreturn [{\n  json: item,\n  binary: {\n    data: {\n      data:          buffer.toString('base64'),\n      mimeType:      'video/mp4',\n      fileName:      item.output_filename,\n      fileExtension: 'mp4'\n    }\n  }\n}];"
-      },
-      "id": "s2-n12",
-      "name": "Read Combined Video",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1560,
-        300
-      ]
+      "position": [880, 0]
     },
     {
       "parameters": {
         "operation": "upload",
-        "name": "={{ $('Build FFmpeg Concat').first().json.output_filename }}",
+        "name": "={{ $('Assemble Video').first().json.output_filename }}",
         "driveId": {
           "__rl": true,
           "value": "MyDrive",
@@ -153,14 +75,11 @@
           "simplifyOutput": false
         }
       },
-      "id": "s2-n13",
+      "id": "node6",
       "name": "Upload Animation to Drive",
       "type": "n8n-nodes-base.googleDrive",
       "typeVersion": 3,
-      "position": [
-        1780,
-        300
-      ],
+      "position": [1100, 0],
       "credentials": {
         "googleDriveOAuth2Api": {
           "id": "QUGEpurbhr31d8QZ",
@@ -192,14 +111,11 @@
           "timeout": 30000
         }
       },
-      "id": "s2-n14",
+      "id": "node7",
       "name": "Make Animation Public",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
-      "position": [
-        2000,
-        300
-      ],
+      "position": [1320, 0],
       "credentials": {
         "googleDriveOAuth2Api": {
           "id": "QUGEpurbhr31d8QZ",
@@ -209,16 +125,13 @@
     },
     {
       "parameters": {
-        "jsCode": "const driveNode  = $('Upload Animation to Drive').first().json;\nconst concatData = $('Build FFmpeg Concat').first().json;\nconst fileId     = driveNode.id;\n\nconst animationUrl   = `https://drive.google.com/uc?export=download&id=${fileId}`;\nconst renderTimeSec  = Math.round((Date.now() - concatData.start_time) / 1000);\n\nreturn [{\n  json: {\n    job_id:               concatData.job_id,\n    manim_video_url:      animationUrl,\n    drive_file_id:        fileId,\n    render_time_seconds:  renderTimeSec,\n    elevenlabs_audio_url: concatData.elevenlabs_audio_url,\n    heygen_avatar_url:    concatData.heygen_avatar_url,\n    status:               'stage2_complete'\n  }\n}];"
+        "jsCode": "const driveNode   = $('Upload Animation to Drive').first().json;\nconst assembleData = $('Assemble Video').first().json;\nconst extractData  = $('Extract Payload').first().json;\nconst fileId = driveNode.id;\n\nconst videoUrl       = 'https://drive.google.com/uc?export=download&id=' + fileId;\nconst renderTimeSec  = Math.round((Date.now() - assembleData.start_time) / 1000);\n\nconsole.log('Stage 2 complete. Job: ' + assembleData.job_id + ', Drive file: ' + fileId + ', Time: ' + renderTimeSec + 's');\n\nreturn [{ json: {\n  job_id:             assembleData.job_id,\n  topic:              assembleData.topic,\n  title:              assembleData.title,\n  video_url:          videoUrl,\n  drive_file_id:      fileId,\n  render_time_seconds: renderTimeSec,\n  sheet_row:          extractData.sheet_row,\n  status:             'stage2_complete'\n} }];"
       },
-      "id": "s2-n15",
+      "id": "node8",
       "name": "Stage 2 Done",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        2220,
-        300
-      ]
+      "position": [1540, 0]
     },
     {
       "parameters": {
@@ -233,15 +146,12 @@
           "timeout": 10000
         }
       },
-      "id": "s2-notify01",
+      "id": "node9",
       "name": "Notify Stage2 Done",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "continueOnFail": true,
-      "position": [
-        2440,
-        300
-      ],
+      "position": [1760, 0],
       "credentials": {
         "googleDriveOAuth2Api": {
           "id": "QUGEpurbhr31d8QZ",
@@ -251,28 +161,6 @@
     }
   ],
   "connections": {
-    "Manual Trigger": {
-      "main": [
-        [
-          {
-            "node": "Stage 2 Test Data",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Stage 2 Test Data": {
-      "main": [
-        [
-          {
-            "node": "Extract Payload",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "Stage 2 Webhook": {
       "main": [
         [
@@ -288,58 +176,36 @@
       "main": [
         [
           {
-            "node": "Render All Scenes",
+            "node": "Submit and Poll Wavespeed",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Render All Scenes": {
+    "Submit and Poll Wavespeed": {
       "main": [
         [
           {
-            "node": "Build FFmpeg Concat",
+            "node": "Assemble Video",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Build FFmpeg Concat": {
+    "Assemble Video": {
       "main": [
         [
           {
-            "node": "Write Concat File",
+            "node": "Read Final Video",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Write Concat File": {
-      "main": [
-        [
-          {
-            "node": "FFmpeg Concat Scenes",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "FFmpeg Concat Scenes": {
-      "main": [
-        [
-          {
-            "node": "Read Combined Video",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Read Combined Video": {
+    "Read Final Video": {
       "main": [
         [
           {
@@ -390,6 +256,7 @@
     "saveManualExecutions": true
   },
   "id": "physics-stage2-pipeline",
+  "name": "Physics Channel - Stage 2 - Video Generation",
   "tags": [
     {
       "name": "physics-channel"
