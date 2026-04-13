@@ -89,7 +89,17 @@ services:
       - HEYGEN_API_KEY=${HEYGEN_API_KEY}
       - HEYGEN_AVATAR_ID=${HEYGEN_AVATAR_ID}
       - YOUTUBE_CHANNEL_ID=${YOUTUBE_CHANNEL_ID}
+      - YOUTUBE_OAUTH_CLIENT_ID=${YOUTUBE_OAUTH_CLIENT_ID}
+      - YOUTUBE_OAUTH_CLIENT_SECRET=${YOUTUBE_OAUTH_CLIENT_SECRET}
+      - YOUTUBE_REFRESH_TOKEN=${YOUTUBE_REFRESH_TOKEN}
       - WAVESPEED_API_KEY=${WAVESPEED_API_KEY}
+      # Stage 3 — Facebook
+      - FB_PAGE_ID=${FB_PAGE_ID}
+      - FB_APP_ID=${FB_APP_ID}
+      - FB_USER_ACCESS_TOKEN=${FB_USER_ACCESS_TOKEN}
+      - FB_PAGE_ACCESS_TOKEN=${FB_PAGE_ACCESS_TOKEN}
+      # Stage 3 — LinkedIn
+      - LINKEDIN_ORGANIZATION_ID=${LINKEDIN_ORGANIZATION_ID}
     volumes:
       # n8n data (workflows, credentials, execution history)
       - ./n8n:/home/node/.n8n
@@ -100,6 +110,7 @@ services:
       - ./ffmpeg/output:/data/ffmpeg/output
       - ./uploads:/data/uploads
       - ./config:/data/config
+      - ./workflows:/data/workflows
 
   # ─────────────────────────────────────────────────────────────
   # ffmpeg-runner  –  Ubuntu 22.04 + FFmpeg + curl/wget

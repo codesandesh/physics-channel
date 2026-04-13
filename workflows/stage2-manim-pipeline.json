@@ -1,1 +1,497 @@
-{"name": "Physics Channel - Stage 2 - Video Generation", "nodes": [{"parameters": {"httpMethod": "POST", "path": "stage2-video", "responseMode": "onReceived", "responseData": "firstEntryJson", "options": {}}, "id": "node1", "name": "Stage 2 Webhook", "type": "n8n-nodes-base.webhook", "typeVersion": 2, "position": [220, 300], "webhookId": "physics-stage2-video"}, {"parameters": {"jsCode": "const raw = $input.first().json;\nconst body = (raw.body !== undefined) ? raw.body : raw;\nif (!body.job_id) throw new Error('Payload missing: job_id');\nif (!Array.isArray(body.clip_prompts) || body.clip_prompts.length === 0) throw new Error('Payload must have clip_prompts array with at least 1 entry');\nreturn [{ json: {\n  job_id: body.job_id,\n  topic: body.topic,\n  title: body.title,\n  hashtags: body.hashtags,\n  narration: body.narration,\n  clip_prompts: body.clip_prompts,\n  audio_path: body.audio_path,\n  subs_path: body.subs_path,\n  audio_duration: body.audio_duration,\n  subtitle_chunks: body.subtitle_chunks,\n  word_timings: body.word_timings || [],\n  sheet_row: body.sheet_row || null,\n  start_time: body.start_time || Date.now()\n} }];"}, "id": "node2", "name": "Extract Payload", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [440, 300]}, {"parameters": {"jsCode": "const { execSync } = require('child_process');\nconst fs = require('fs');\n\nconst data           = $input.first().json;\nconst jobId          = data.job_id;\nconst videoUrls      = data.video_urls;\nconst subtitleChunks = data.subtitle_chunks || [];\nconst audioDuration  = data.audio_duration || 30;\nconst wordTimings    = data.word_timings || [];\nconst N              = videoUrls.length;\n\nconst n8nIn   = '/data/ffmpeg/input';\nconst n8nOut  = '/data/ffmpeg/output';\nconst contIn  = '/ffmpeg/input';\nconst contOut = '/ffmpeg/output';\n\nif (!fs.existsSync(n8nIn))  fs.mkdirSync(n8nIn,  { recursive: true });\nif (!fs.existsSync(n8nOut)) fs.mkdirSync(n8nOut, { recursive: true });\n\nfunction run(cmd, timeout) {\n  let out = '';\n  try { out = execSync(cmd, { encoding: 'utf-8', timeout: timeout || 120000 }); }\n  catch(e) { out = ((e.stdout || '') + (e.stderr || '') + (e.message || '')).toString(); }\n  return out;\n}\n\nconsole.log('Assembling ' + N + ' clips | audio: ' + audioDuration.toFixed(1) + 's');\n\n// ── STEP 1: Download all clips ────────────────────────────────\nfor (let i = 0; i < N; i++) {\n  const dest = contIn + '/' + jobId + '_clip' + i + '.mp4';\n  console.log('Downloading clip ' + (i+1) + '/' + N + '...');\n  const out = run(\n    'docker exec ffmpeg-runner curl -sL --max-time 90 -o \"' + dest + '\" \"' + videoUrls[i] + '\" && echo DL_OK',\n    100000\n  );\n  if (!out.includes('DL_OK'))\n    throw new Error('Clip ' + i + ' download failed: ' + out.slice(-200));\n}\nconsole.log('All clips downloaded');\n\n// ── STEP 2: Normalize each clip to 1080x1920 (9:16) ──────────\n// Pad with black bars if aspect ratio differs — keeps full content\nfor (let i = 0; i < N; i++) {\n  const src  = contIn  + '/' + jobId + '_clip' + i + '.mp4';\n  const norm = contIn  + '/' + jobId + '_clip' + i + '_norm.mp4';\n  const out  = run(\n    'docker exec ffmpeg-runner ffmpeg -y -i \"' + src + '\" ' +\n    '-vf \"scale=1080:1920:force_original_aspect_ratio=decrease,' +\n         'pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black\" ' +\n    '-r 24 -c:v libx264 -crf 20 -preset fast -an \"' + norm + '\" 2>&1 && echo NORM_OK',\n    180000\n  );\n  if (!out.includes('NORM_OK'))\n    throw new Error('Normalize clip ' + i + ' failed: ' + out.slice(-300));\n}\nconsole.log('All clips normalized to 1080x1920 @ 24fps');\n\n// ── STEP 3: Concat with XFADE transitions ────────────────────\n// xfade creates smooth crossfade between consecutive clips.\n// Fade duration = 0.3s. CLIP_DUR comes from Submit Clips node (always 5).\n// Offset = i * (CLIP_DUR - 0.3)  (where the next clip starts blending)\nconst FADE_DUR = 0.3;\nconst CLIP_DUR = data.clip_dur || 5;\nconst NET      = CLIP_DUR - FADE_DUR;   // effective duration per clip before fade\nconsole.log('CLIP_DUR=' + CLIP_DUR + 's (from payload), FADE_DUR=' + FADE_DUR + 's, NET=' + NET + 's');\n\nlet withTransitions;\n\nif (N === 1) {\n  // Single clip — no transitions needed\n  withTransitions = contIn + '/' + jobId + '_clip0_norm.mp4';\n  console.log('Single clip, skipping xfade');\n} else {\n  // Build -filter_complex xfade chain:\n  // [0:v][1:v]xfade=fade:0.5:9.5[x1];[x1][2:v]xfade=fade:0.5:19.0[x2];...\n  const inputs  = Array.from({ length: N }, (_, i) =>\n    '-i \"' + contIn + '/' + jobId + '_clip' + i + '_norm.mp4\"'\n  ).join(' ');\n\n  let filterParts = [];\n  let prevLabel   = '[0:v]';\n  for (let i = 1; i < N; i++) {\n    const offset   = (i * NET).toFixed(1);\n    const outLabel = (i === N - 1) ? '[vout]' : '[x' + i + ']';\n    filterParts.push(prevLabel + '[' + i + ':v]xfade=transition=fade:duration=' + FADE_DUR + ':offset=' + offset + outLabel);\n    prevLabel = outLabel;\n  }\n  const filterComplex = filterParts.join('; ');\n\n  const xfadeOut = contIn + '/' + jobId + '_xfade.mp4';\n  const xfadeCmd =\n    'docker exec ffmpeg-runner ffmpeg -y ' + inputs + ' ' +\n    '-filter_complex \"' + filterComplex + '\" ' +\n    '-map \"[vout]\" -c:v libx264 -crf 20 -preset fast \"' + xfadeOut + '\" 2>&1 && echo XFADE_OK';\n\n  console.log('Building xfade for ' + N + ' clips...');\n  const out = run(xfadeCmd, 600000);\n  if (!out.includes('XFADE_OK'))\n    throw new Error('xfade failed: ' + out.slice(-500));\n  withTransitions = xfadeOut;\n  console.log('xfade complete');\n}\n\n// ── STEP 4: Write ASS subtitle file ────────────────────────────────\nfunction toAssTime(sec) {\n  const h  = Math.floor(sec / 3600);\n  const m  = Math.floor((sec % 3600) / 60);\n  const s  = Math.floor(sec % 60);\n  const cs = Math.round((sec % 1) * 100);\n  const pad2 = n => String(n).padStart(2, '0');\n  return h + ':' + pad2(m) + ':' + pad2(s) + '.' + pad2(cs);\n}\n\nconst assHeader =\n  '[Script Info]\\n' +\n  'ScriptType: v4.00+\\n' +\n  'PlayResX: 1080\\n' +\n  'PlayResY: 1920\\n' +\n  'ScaledBorderAndShadow: yes\\n' +\n  '\\n' +\n  '[V4+ Styles]\\n' +\n  'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\\n' +\n  'Style: Default,Arial,72,&H00FFFFFF,&H000000FF,&H00000000,&HAA000000,1,0,0,0,100,100,0,0,4,0,1,2,40,40,180,1\\n' +\n  '\\n' +\n  '[Events]\\n' +\n  'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\\n';\n\nlet assEvents = '';\n\nif (wordTimings.length > 0) {\n  for (let g = 0; g < wordTimings.length; g += 3) {\n    const group = wordTimings.slice(g, g + 3);\n    const nextGroupStart = (wordTimings[g + 3]) ? wordTimings[g + 3].start : null;\n\n    for (let w = 0; w < group.length; w++) {\n      const word = group[w];\n      const nextWord = group[w + 1];\n\n      let evEnd;\n      if (nextWord) {\n        evEnd = nextWord.start;\n      } else {\n        evEnd = word.end + 0.15;\n        if (nextGroupStart && evEnd > nextGroupStart) evEnd = nextGroupStart;\n      }\n\n      let text = '';\n      for (let i = 0; i < group.length; i++) {\n        if (i > 0) text += ' ';\n        if (i === w) {\n          text += '{\\\\c&H0000FFFF&}' + group[i].text.toUpperCase() + '{\\\\c&H00FFFFFF&}';\n        } else {\n          text += group[i].text.toUpperCase();\n        }\n      }\n\n      assEvents += 'Dialogue: 0,' + toAssTime(word.start) + ',' + toAssTime(evEnd) +\n                   ',Default,,0,0,0,,' + text + '\\n';\n    }\n  }\n} else {\n  for (let i = 0; i < subtitleChunks.length; i++) {\n    const c = subtitleChunks[i];\n    assEvents += 'Dialogue: 0,' + toAssTime(c.start) + ',' + toAssTime(c.end) +\n                 ',Default,,0,0,0,,' + c.text.toUpperCase() + '\\n';\n  }\n}\n\nconst assContent = assHeader + assEvents;\nconst assN8nPath = n8nIn + '/' + jobId + '.ass';\nconst assContPath = contIn + '/' + jobId + '.ass';\nfs.writeFileSync(assN8nPath, assContent, 'utf-8');\nconsole.log('ASS file saved: ' + assN8nPath + ' (' + assEvents.split('\\n').filter(Boolean).length + ' events)');\n\n// ── STEP 5: Final — video + narration audio + burned ASS subtitles ─\nconst audioContPath = contIn + '/' + jobId + '_narration.mp3';\nconst finalContPath = contOut + '/' + jobId + '_final.mp4';\n\nconst finalCmd =\n  'docker exec ffmpeg-runner ffmpeg -y ' +\n  '-i \"' + withTransitions + '\" ' +\n  '-i \"' + audioContPath + '\" ' +\n  '-vf \"ass=\\'' + assContPath + '\\'\" ' +\n  '-c:v libx264 -crf 20 -preset fast ' +\n  '-c:a aac -b:a 128k ' +\n  '-movflags +faststart ' +\n  '-shortest ' +\n  '\"' + finalContPath + '\" 2>&1 && echo FINAL_OK';\n\nconsole.log('Running final assembly...');\nconst finalOut = run(finalCmd, 900000);\nif (!finalOut.includes('FINAL_OK'))\n  throw new Error('Final assembly failed: ' + finalOut.slice(-600));\n\nconst n8nFinalPath = n8nOut + '/' + jobId + '_final.mp4';\nif (!fs.existsSync(n8nFinalPath))\n  throw new Error('Final video missing: ' + n8nFinalPath);\n\nconsole.log('Done! Final video: ' + n8nFinalPath);\n\nreturn [{ json: {\n  ...data,\n  output_filename:  jobId + '_final.mp4',\n  final_video_path: n8nFinalPath,\n  clips_used:       N,\n  audio_duration:   audioDuration\n}}];\n"}, "id": "node4", "name": "Assemble Video", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [1540, 300]}, {"parameters": {"jsCode": "const fs = require('fs');\nconst item = $input.first().json;\nconst filePath = item.final_video_path;\n\nif (!fs.existsSync(filePath)) {\n  throw new Error('Final video not found at: ' + filePath);\n}\n\nconst buffer = fs.readFileSync(filePath);\n\nreturn [{\n  json: item,\n  binary: {\n    data: {\n      data: buffer.toString('base64'),\n      mimeType: 'video/mp4',\n      fileName: item.output_filename,\n      fileExtension: 'mp4'\n    }\n  }\n}];"}, "id": "node5", "name": "Read Final Video", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [1760, 300]}, {"parameters": {"operation": "upload", "name": "={{ $('Assemble Video').first().json.output_filename }}", "driveId": {"__rl": true, "value": "MyDrive", "mode": "list", "cachedResultName": "My Drive"}, "folderId": {"__rl": true, "value": "={{ $env.GOOGLE_DRIVE_FOLDER_ID }}", "mode": "id"}, "options": {"simplifyOutput": false}}, "id": "node6", "name": "Upload Animation to Drive", "type": "n8n-nodes-base.googleDrive", "typeVersion": 3, "position": [1980, 300], "credentials": {"googleDriveOAuth2Api": {"id": "QUGEpurbhr31d8QZ", "name": "Google Drive account 3"}}}, {"parameters": {"method": "POST", "url": "={{ 'https://www.googleapis.com/drive/v3/files/' + $json.id + '/permissions' }}", "authentication": "predefinedCredentialType", "nodeCredentialType": "googleDriveOAuth2Api", "sendBody": true, "contentType": "json", "bodyParameters": {"parameters": [{"name": "type", "value": "anyone"}, {"name": "role", "value": "reader"}]}, "options": {"timeout": 30000}}, "id": "node7", "name": "Make Animation Public", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4, "position": [2200, 300], "credentials": {"googleDriveOAuth2Api": {"id": "QUGEpurbhr31d8QZ", "name": "Google Drive account 3"}}}, {"parameters": {"jsCode": "const driveNode   = $('Upload Animation to Drive').first().json;\nconst assembleData = $('Assemble Video').first().json;\nconst extractData  = $('Extract Payload').first().json;\nconst fileId = driveNode.id;\n\nconst videoUrl       = 'https://drive.google.com/uc?export=download&id=' + fileId;\nconst renderTimeSec  = Math.round((Date.now() - assembleData.start_time) / 1000);\n\nconsole.log('Stage 2 complete. Job: ' + assembleData.job_id + ', Drive file: ' + fileId + ', Time: ' + renderTimeSec + 's');\n\nreturn [{ json: {\n  job_id:             assembleData.job_id,\n  topic:              assembleData.topic,\n  title:              assembleData.title,\n  video_url:          videoUrl,\n  drive_file_id:      fileId,\n  render_time_seconds: renderTimeSec,\n  sheet_row:          extractData.sheet_row,\n  status:             'stage2_complete'\n} }];"}, "id": "node8", "name": "Stage 2 Done", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [2420, 300]}, {"parameters": {"method": "PUT", "url": "={{ 'https://sheets.googleapis.com/v4/spreadsheets/17sx-y_QDWYHFPR4sfpx9pPd8YHFx-aX8jh8tLtZXELQ/values/%F0%9F%8E%AC%20Dashboard!E' + $('Extract Payload').first().json.sheet_row + '?valueInputOption=USER_ENTERED' }}", "authentication": "predefinedCredentialType", "nodeCredentialType": "googleDriveOAuth2Api", "sendBody": true, "contentType": "json", "body": "={{ JSON.stringify({range:'Dashboard!E'+$('Extract Payload').first().json.sheet_row,majorDimension:'ROWS',values:[['DONE']]}) }}", "options": {"timeout": 10000}}, "id": "node9", "name": "Notify Stage2 Done", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4, "continueOnFail": true, "position": [2640, 300], "credentials": {"googleDriveOAuth2Api": {"id": "QUGEpurbhr31d8QZ", "name": "Google Drive account 3"}}}, {"id": "nodeSubmit", "name": "Submit Clips to Wavespeed", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [660, 300], "parameters": {"jsCode": "const https = require('https');\nconst data = $input.first().json;\nconst apiKey = $env.WAVESPEED_API_KEY;\nconst clipPrompts = data.clip_prompts;\n\nif (!Array.isArray(clipPrompts) || clipPrompts.length === 0)\n  throw new Error('No clip_prompts in payload');\n\n// Determine how many clips we need based on audio duration\nconst audioDuration = data.audio_duration || 25;\nconst clipsNeeded   = Math.min(clipPrompts.length, Math.max(2, Math.ceil(audioDuration / 5)));\n\nconst clipDur = 5;\nconsole.log('Audio duration: ' + audioDuration.toFixed(1) + 's | ' + clipsNeeded + ' clips | clip duration: ' + clipDur + 's');\n\nfunction apiPost(body) {\n  return new Promise((resolve, reject) => {\n    const buf = Buffer.from(JSON.stringify(body));\n    const req = https.request({\n      hostname: 'api.wavespeed.ai',\n      path: '/api/v3/bytedance/seedance-v1-lite-t2v-720p',\n      method: 'POST',\n      headers: {\n        'Authorization': 'Bearer ' + apiKey,\n        'Content-Type': 'application/json',\n        'Content-Length': buf.length\n      }\n    }, (res) => {\n      const chunks = [];\n      res.on('data', c => chunks.push(c));\n      res.on('end', () => {\n        try { resolve(JSON.parse(Buffer.concat(chunks).toString())); }\n        catch(e) { reject(new Error('Bad JSON from Wavespeed: ' + Buffer.concat(chunks).toString().slice(0,200))); }\n      });\n    });\n    req.on('error', reject);\n    req.write(buf);\n    req.end();\n  });\n}\n\n// Submit clips in parallel (faster than sequential)\nconst submitPromises = [];\nfor (let i = 0; i < clipsNeeded; i++) {\n  console.log('Submitting clip ' + (i+1) + '/' + clipsNeeded + ' (duration=' + clipDur + 's)...');\n  console.log('  Prompt: ' + clipPrompts[i].slice(0, 100) + '...');\n  submitPromises.push(\n    apiPost({\n      prompt:          (p => p.length <= 450 ? p : p.slice(0, p.lastIndexOf(' ', 450)))(clipPrompts[i]),\n      aspect_ratio:    '9:16',\n      duration:        5,\n      seed:            -1\n    })\n  );\n}\n\nconst results = await Promise.all(submitPromises);\n\nconst task_ids = [];\nfor (let i = 0; i < results.length; i++) {\n  const r = results[i];\n  if (!r.data || !r.data.id)\n    throw new Error('Wavespeed submit failed clip ' + i + ': ' + JSON.stringify(r));\n  task_ids.push(r.data.id);\n  console.log('Clip ' + (i+1) + ' submitted — task id: ' + r.data.id);\n}\n\nconsole.log('All ' + clipsNeeded + ' clips submitted in parallel. clip_dur=' + clipDur + 's. Waiting for generation...');\n\nreturn [{ json: {\n  ...data,\n  task_ids,\n  clips_count:  clipsNeeded,\n  clip_dur:     clipDur,\n  video_urls:   new Array(clipsNeeded).fill(null),\n  poll_attempt: 0,\n  all_done:     false\n}}];\n"}}, {"id": "nodeWait", "name": "Wait 20 Seconds", "type": "n8n-nodes-base.wait", "typeVersion": 1, "position": [880, 300], "webhookId": "wavespeed-poll-resume", "parameters": {"amount": 20, "unit": "seconds"}}, {"id": "nodeCheck", "name": "Check Clip Status", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [1100, 300], "parameters": {"jsCode": "const https = require('https');\nconst data = $input.first().json;\nconst apiKey = $env.WAVESPEED_API_KEY;\nconst task_ids   = data.task_ids;\nconst video_urls = [...(data.video_urls || [null, null, null])];\nconst attempt    = (data.poll_attempt || 0) + 1;\n\nconsole.log('--- Poll attempt #' + attempt + ' ---');\n\nfunction apiGet(taskId) {\n  return new Promise((resolve, reject) => {\n    const req = https.request({\n      hostname: 'api.wavespeed.ai',\n      path: '/api/v3/predictions/' + taskId + '/result',\n      method: 'GET',\n      headers: { 'Authorization': 'Bearer ' + apiKey }\n    }, (res) => {\n      const chunks = [];\n      res.on('data', c => chunks.push(c));\n      res.on('end', () => {\n        const raw = Buffer.concat(chunks).toString();\n        try { resolve(JSON.parse(raw)); }\n        catch(e) { reject(new Error('Non-JSON from Wavespeed status [HTTP ' + res.statusCode + ']: ' + raw.slice(0,200))); }\n      });\n    });\n    req.on('error', reject);\n    req.end();\n  });\n}\n\n// Check each clip that is not yet complete\nfor (let i = 0; i < task_ids.length; i++) {\n  if (video_urls[i] !== null) {\n    console.log('Clip ' + i + ' already done, skipping');\n    continue;\n  }\n\n  const r = await apiGet(task_ids[i]);\n  const status = (r.data && r.data.status) || 'unknown';\n  console.log('Clip ' + i + ' [' + task_ids[i] + '] status: ' + status);\n\n  if (status === 'succeeded' || status === 'completed') {\n    const url = r.data.outputs && r.data.outputs[0];\n    if (!url) throw new Error('Clip ' + i + ' done but output URL missing. status=' + status + ' resp=' + JSON.stringify(r.data).slice(0,300));\n    video_urls[i] = url;\n    console.log('Clip ' + i + ' ready: ' + url);\n  } else if (status === 'failed') {\n    throw new Error('Clip ' + i + ' FAILED: ' + JSON.stringify(r.data));\n  } else {\n    console.log('Clip ' + i + ' still ' + status + ' — will retry in 20s');\n  }\n}\n\nconst pending_count = video_urls.filter(u => u === null).length;\nconst clips_status = pending_count === 0 ? 'done' : 'waiting';\n\nif (clips_status === 'done') {\n  console.log('All clips ready! clips_status=done — proceeding to assembly.');\n} else {\n  console.log(pending_count + ' clip(s) still generating. clips_status=waiting.');\n}\n\nreturn [{ json: {\n  ...data,\n  task_ids,\n  video_urls,\n  poll_attempt: attempt,\n  pending_count,\n  clips_status\n}}];\n"}}, {"id": "nodeIf", "name": "All Clips Ready?", "type": "n8n-nodes-base.if", "typeVersion": 2, "position": [1320, 300], "parameters": {"conditions": {"options": {"caseSensitive": true, "leftValue": "", "typeValidation": "loose"}, "conditions": [{"id": "cond1", "leftValue": "={{ $json.clips_status }}", "rightValue": "done", "operator": {"type": "string", "operation": "equals"}}], "combinator": "and"}}}, {"id": "nodeManual", "name": "Manual Trigger", "type": "n8n-nodes-base.manualTrigger", "typeVersion": 1, "position": [-200, 300], "parameters": {}}, {"id": "nodeTestData", "name": "Test Data", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [20, 300], "parameters": {"jsCode": "return [{ json: {\"job_id\": \"PHY-30052466\", \"topic\": \"Millikan oil drop experiment\", \"title\": \"Millikan's Oil Drop: Unveiling Electron's Charge\", \"hashtags\": \"#physics #science #shorts #learnphysics\", \"narration\": \"How small is the fundamental unit of electric charge? Millikan's oil drop experiment precisely measured this elusive value. Microscopic oil droplets, negatively charged by friction, are sprayed into a chamber between two parallel plates. Initially, they fall under gravity, their terminal velocity revealing their mass. Then, an electric field is applied, causing the charged drops to rise or hover. By meticulously balancing gravitational and electric forces, Millikan calculated the charge on each drop. He discovered all charges were integer multiples of a single, fundamental unit: the electron's charge, 1.602 x 10^-19 Coulombs.\", \"clip_prompts\": [\"Cinematic slow-motion 9:16 vertical physics simulation, microscopic oil droplets (diameter 1-5 micrometers) with glowing cyan negative charges forming on their surface as they are aerosolized from a nozzle, camera slow-zooms out from the nozzle showing droplets entering a dark chamber, dark laboratory background, high contrast, glowing particle trails, scientific documentary grade, no text, no people\", \"Cinematic slow-motion 9:16 vertical physics simulation, negatively charged oil droplets (glowing cyan spheres) drifting downwards into a dark chamber with two clearly visible parallel, uncharged metal plates (5cm apart) at the top and bottom, camera tracks a single droplet as it enters the space between the plates, dark laboratory background, high contrast, glowing particle trails, scientific documentary grade, no text, no people\", \"Cinematic slow-motion 9:16 vertical physics simulation, several negatively charged oil droplets (glowing cyan spheres) falling at a constant terminal velocity of approximately 0.1 mm/s between two uncharged parallel plates, subtle downward-pointing gravitational force vector (amber) acting on one droplet, camera tracks one droplet from above as it descends, dark laboratory background, high contrast, glowing particle trails, scientific documentary grade, no text, no people\", \"Cinematic slow-motion 9:16 vertical physics simulation, an electric field (glowing blue field lines pointing downwards, created by a 5000V potential difference across the 5cm plates) is suddenly applied, causing a negatively charged oil droplet (glowing cyan sphere) to slow its descent and begin rising upwards at 0.05 mm/s, camera follows the rising droplet from below, dark laboratory background, high contrast, glowing particle trails, scientific documentary grade, no text, no people\", \"Cinematic slow-motion 9:16 vertical physics simulation, a single negatively charged oil droplet (glowing cyan sphere) perfectly hovering motionless between two parallel plates, an upward electric force vector (glowing blue) exactly balancing a downward gravitational force vector (glowing amber) of equal magnitude, camera orbits 90 degrees around the hovering droplet at eye level, dark laboratory background, high contrast, glowing particle trails, scientific documentary grade, no text, no people\", \"Cinematic slow-motion 9:16 vertical physics simulation, a close-up on a single negatively charged oil droplet (glowing cyan sphere) with subtle shimmering indicating discrete charge packets, as other similar droplets (some with -1e, -2e, -3e charges) are shown briefly in the background hovering at slightly different equilibrium points, camera slowly zooms out to reveal multiple droplets at different levels, dark laboratory background, high contrast, glowing particle trails, scientific documentary grade, no text, no people\"], \"audio_path\": \"/data/ffmpeg/input/PHY-30052466_narration.mp3\", \"subs_path\": \"/data/ffmpeg/input/PHY-30052466_subs.json\", \"audio_duration\": 43.7, \"subtitle_chunks\": [{\"text\": \"How small is\", \"start\": 0, \"end\": 0.948, \"words\": [{\"text\": \"How\", \"start\": 0, \"end\": 0.232}, {\"text\": \"small\", \"start\": 0.348, \"end\": 0.766}, {\"text\": \"is\", \"start\": 0.848, \"end\": 0.952}]}, {\"text\": \"the fundamental unit\", \"start\": 0.998, \"end\": 2.063, \"words\": [{\"text\": \"the\", \"start\": 0.998, \"end\": 1.068}, {\"text\": \"fundamental\", \"start\": 1.126, \"end\": 1.707}, {\"text\": \"unit\", \"start\": 1.8, \"end\": 2.055}]}, {\"text\": \"of electric charge?\", \"start\": 2.113, \"end\": 3.436, \"words\": [{\"text\": \"of\", \"start\": 2.113, \"end\": 2.171}, {\"text\": \"electric\", \"start\": 2.229, \"end\": 2.612}, {\"text\": \"charge?\", \"start\": 2.67, \"end\": 3.286}]}, {\"text\": \"Millikan's oil drop\", \"start\": 3.611, \"end\": 4.861, \"words\": [{\"text\": \"Millikan's\", \"start\": 3.611, \"end\": 4.145}, {\"text\": \"oil\", \"start\": 4.226, \"end\": 4.505}, {\"text\": \"drop\", \"start\": 4.586, \"end\": 4.853}]}, {\"text\": \"experiment precisely measured\", \"start\": 4.911, \"end\": 6.51, \"words\": [{\"text\": \"experiment\", \"start\": 4.911, \"end\": 5.457}, {\"text\": \"precisely\", \"start\": 5.515, \"end\": 6.095}, {\"text\": \"measured\", \"start\": 6.165, \"end\": 6.525}]}, {\"text\": \"this elusive value.\", \"start\": 6.56, \"end\": 8.08, \"words\": [{\"text\": \"this\", \"start\": 6.56, \"end\": 6.687}, {\"text\": \"elusive\", \"start\": 6.757, \"end\": 7.256}, {\"text\": \"value.\", \"start\": 7.303, \"end\": 7.93}]}, {\"text\": \"Microscopic oil droplets,\", \"start\": 8.44, \"end\": 10.529, \"words\": [{\"text\": \"Microscopic\", \"start\": 8.44, \"end\": 9.253}, {\"text\": \"oil\", \"start\": 9.323, \"end\": 9.567}, {\"text\": \"droplets,\", \"start\": 9.636, \"end\": 10.379}]}, {\"text\": \"negatively charged by\", \"start\": 10.588, \"end\": 11.653, \"words\": [{\"text\": \"negatively\", \"start\": 10.588, \"end\": 11.053}, {\"text\": \"charged\", \"start\": 11.111, \"end\": 11.482}, {\"text\": \"by\", \"start\": 11.517, \"end\": 11.622}]}, {\"text\": \"friction, are sprayed\", \"start\": 11.703, \"end\": 13.058, \"words\": [{\"text\": \"friction,\", \"start\": 11.703, \"end\": 12.307}, {\"text\": \"are\", \"start\": 12.481, \"end\": 12.666}, {\"text\": \"sprayed\", \"start\": 12.701, \"end\": 13.073}]}, {\"text\": \"into a chamber\", \"start\": 13.108, \"end\": 13.836, \"words\": [{\"text\": \"into\", \"start\": 13.108, \"end\": 13.259}, {\"text\": \"a\", \"start\": 13.328, \"end\": 13.363}, {\"text\": \"chamber\", \"start\": 13.421, \"end\": 13.816}]}, {\"text\": \"between two parallel\", \"start\": 13.886, \"end\": 15.124, \"words\": [{\"text\": \"between\", \"start\": 13.886, \"end\": 14.222}, {\"text\": \"two\", \"start\": 14.28, \"end\": 14.547}, {\"text\": \"parallel\", \"start\": 14.64, \"end\": 15.104}]}, {\"text\": \"plates. Initially, they\", \"start\": 15.174, \"end\": 16.842, \"words\": [{\"text\": \"plates.\", \"start\": 15.174, \"end\": 15.766}, {\"text\": \"Initially,\", \"start\": 16.149, \"end\": 16.683}, {\"text\": \"they\", \"start\": 16.707, \"end\": 16.834}]}, {\"text\": \"fall under gravity,\", \"start\": 16.892, \"end\": 17.992, \"words\": [{\"text\": \"fall\", \"start\": 16.892, \"end\": 17.09}, {\"text\": \"under\", \"start\": 17.148, \"end\": 17.31}, {\"text\": \"gravity,\", \"start\": 17.357, \"end\": 17.926}]}, {\"text\": \"their terminal velocity\", \"start\": 18.042, \"end\": 19.164, \"words\": [{\"text\": \"their\", \"start\": 18.042, \"end\": 18.227}, {\"text\": \"terminal\", \"start\": 18.274, \"end\": 18.622}, {\"text\": \"velocity\", \"start\": 18.657, \"end\": 19.133}]}, {\"text\": \"revealing their mass.\", \"start\": 19.214, \"end\": 20.618, \"words\": [{\"text\": \"revealing\", \"start\": 19.214, \"end\": 19.655}, {\"text\": \"their\", \"start\": 19.702, \"end\": 19.841}, {\"text\": \"mass.\", \"start\": 19.899, \"end\": 20.468}]}, {\"text\": \"Then, an electric\", \"start\": 20.979, \"end\": 22.009, \"words\": [{\"text\": \"Then,\", \"start\": 20.979, \"end\": 21.362}, {\"text\": \"an\", \"start\": 21.409, \"end\": 21.525}, {\"text\": \"electric\", \"start\": 21.583, \"end\": 21.989}]}, {\"text\": \"field is applied,\", \"start\": 22.059, \"end\": 23.184, \"words\": [{\"text\": \"field\", \"start\": 22.059, \"end\": 22.291}, {\"text\": \"is\", \"start\": 22.337, \"end\": 22.407}, {\"text\": \"applied,\", \"start\": 22.442, \"end\": 23.034}]}, {\"text\": \"causing the charged\", \"start\": 23.243, \"end\": 24.122, \"words\": [{\"text\": \"causing\", \"start\": 23.243, \"end\": 23.568}, {\"text\": \"the\", \"start\": 23.614, \"end\": 23.684}, {\"text\": \"charged\", \"start\": 23.731, \"end\": 24.125}]}, {\"text\": \"drops to rise\", \"start\": 24.172, \"end\": 25.097, \"words\": [{\"text\": \"drops\", \"start\": 24.172, \"end\": 24.497}, {\"text\": \"to\", \"start\": 24.532, \"end\": 24.601}, {\"text\": \"rise\", \"start\": 24.717, \"end\": 25.101}]}, {\"text\": \"or hover. By\", \"start\": 25.147, \"end\": 26.467, \"words\": [{\"text\": \"or\", \"start\": 25.147, \"end\": 25.24}, {\"text\": \"hover.\", \"start\": 25.298, \"end\": 25.797}, {\"text\": \"By\", \"start\": 26.308, \"end\": 26.447}]}, {\"text\": \"meticulously balancing gravitational\", \"start\": 26.517, \"end\": 28.592, \"words\": [{\"text\": \"meticulously\", \"start\": 26.517, \"end\": 27.19}, {\"text\": \"balancing\", \"start\": 27.26, \"end\": 27.759}, {\"text\": \"gravitational\", \"start\": 27.817, \"end\": 28.595}]}, {\"text\": \"and electric forces,\", \"start\": 28.642, \"end\": 29.976, \"words\": [{\"text\": \"and\", \"start\": 28.642, \"end\": 28.711}, {\"text\": \"electric\", \"start\": 28.758, \"end\": 29.106}, {\"text\": \"forces,\", \"start\": 29.176, \"end\": 29.826}]}, {\"text\": \"Millikan calculated the\", \"start\": 30.07, \"end\": 31.227, \"words\": [{\"text\": \"Millikan\", \"start\": 30.07, \"end\": 30.476}, {\"text\": \"calculated\", \"start\": 30.557, \"end\": 31.114}, {\"text\": \"the\", \"start\": 31.149, \"end\": 31.219}]}, {\"text\": \"charge on each\", \"start\": 31.277, \"end\": 32.063, \"words\": [{\"text\": \"charge\", \"start\": 31.277, \"end\": 31.637}, {\"text\": \"on\", \"start\": 31.672, \"end\": 31.753}, {\"text\": \"each\", \"start\": 31.823, \"end\": 32.055}]}, {\"text\": \"drop. He discovered\", \"start\": 32.113, \"end\": 33.665, \"words\": [{\"text\": \"drop.\", \"start\": 32.113, \"end\": 32.635}, {\"text\": \"He\", \"start\": 32.96, \"end\": 33.077}, {\"text\": \"discovered\", \"start\": 33.135, \"end\": 33.634}]}, {\"text\": \"all charges were\", \"start\": 33.715, \"end\": 34.698, \"words\": [{\"text\": \"all\", \"start\": 33.715, \"end\": 33.936}, {\"text\": \"charges\", \"start\": 34.017, \"end\": 34.505}, {\"text\": \"were\", \"start\": 34.563, \"end\": 34.702}]}, {\"text\": \"integer multiples of\", \"start\": 34.748, \"end\": 35.79, \"words\": [{\"text\": \"integer\", \"start\": 34.748, \"end\": 35.12}, {\"text\": \"multiples\", \"start\": 35.19, \"end\": 35.689}, {\"text\": \"of\", \"start\": 35.735, \"end\": 35.793}]}, {\"text\": \"a single, fundamental\", \"start\": 35.84, \"end\": 36.974, \"words\": [{\"text\": \"a\", \"start\": 35.84, \"end\": 35.863}, {\"text\": \"single,\", \"start\": 35.921, \"end\": 36.327}, {\"text\": \"fundamental\", \"start\": 36.362, \"end\": 36.943}]}, {\"text\": \"unit: the electron's\", \"start\": 37.024, \"end\": 38.414, \"words\": [{\"text\": \"unit:\", \"start\": 37.024, \"end\": 37.442}, {\"text\": \"the\", \"start\": 37.721, \"end\": 37.813}, {\"text\": \"electron's\", \"start\": 37.86, \"end\": 38.406}]}, {\"text\": \"charge, 1.602 x\", \"start\": 38.464, \"end\": 40.933, \"words\": [{\"text\": \"charge,\", \"start\": 38.464, \"end\": 38.974}, {\"text\": \"1.602\", \"start\": 39.149, \"end\": 40.31}, {\"text\": \"x\", \"start\": 40.82, \"end\": 40.913}]}, {\"text\": \"10^-19 Coulombs.\", \"start\": 40.983, \"end\": 43.65, \"words\": [{\"text\": \"10^-19\", \"start\": 40.983, \"end\": 42.678}, {\"text\": \"Coulombs.\", \"start\": 42.771, \"end\": 43.7}]}], \"word_timings\": [{\"text\": \"How\", \"start\": 0, \"end\": 0.232}, {\"text\": \"small\", \"start\": 0.348, \"end\": 0.766}, {\"text\": \"is\", \"start\": 0.848, \"end\": 0.952}, {\"text\": \"the\", \"start\": 0.998, \"end\": 1.068}, {\"text\": \"fundamental\", \"start\": 1.126, \"end\": 1.707}, {\"text\": \"unit\", \"start\": 1.8, \"end\": 2.055}, {\"text\": \"of\", \"start\": 2.113, \"end\": 2.171}, {\"text\": \"electric\", \"start\": 2.229, \"end\": 2.612}, {\"text\": \"charge?\", \"start\": 2.67, \"end\": 3.286}, {\"text\": \"Millikan's\", \"start\": 3.611, \"end\": 4.145}, {\"text\": \"oil\", \"start\": 4.226, \"end\": 4.505}, {\"text\": \"drop\", \"start\": 4.586, \"end\": 4.853}, {\"text\": \"experiment\", \"start\": 4.911, \"end\": 5.457}, {\"text\": \"precisely\", \"start\": 5.515, \"end\": 6.095}, {\"text\": \"measured\", \"start\": 6.165, \"end\": 6.525}, {\"text\": \"this\", \"start\": 6.56, \"end\": 6.687}, {\"text\": \"elusive\", \"start\": 6.757, \"end\": 7.256}, {\"text\": \"value.\", \"start\": 7.303, \"end\": 7.93}, {\"text\": \"Microscopic\", \"start\": 8.44, \"end\": 9.253}, {\"text\": \"oil\", \"start\": 9.323, \"end\": 9.567}, {\"text\": \"droplets,\", \"start\": 9.636, \"end\": 10.379}, {\"text\": \"negatively\", \"start\": 10.588, \"end\": 11.053}, {\"text\": \"charged\", \"start\": 11.111, \"end\": 11.482}, {\"text\": \"by\", \"start\": 11.517, \"end\": 11.622}, {\"text\": \"friction,\", \"start\": 11.703, \"end\": 12.307}, {\"text\": \"are\", \"start\": 12.481, \"end\": 12.666}, {\"text\": \"sprayed\", \"start\": 12.701, \"end\": 13.073}, {\"text\": \"into\", \"start\": 13.108, \"end\": 13.259}, {\"text\": \"a\", \"start\": 13.328, \"end\": 13.363}, {\"text\": \"chamber\", \"start\": 13.421, \"end\": 13.816}, {\"text\": \"between\", \"start\": 13.886, \"end\": 14.222}, {\"text\": \"two\", \"start\": 14.28, \"end\": 14.547}, {\"text\": \"parallel\", \"start\": 14.64, \"end\": 15.104}, {\"text\": \"plates.\", \"start\": 15.174, \"end\": 15.766}, {\"text\": \"Initially,\", \"start\": 16.149, \"end\": 16.683}, {\"text\": \"they\", \"start\": 16.707, \"end\": 16.834}, {\"text\": \"fall\", \"start\": 16.892, \"end\": 17.09}, {\"text\": \"under\", \"start\": 17.148, \"end\": 17.31}, {\"text\": \"gravity,\", \"start\": 17.357, \"end\": 17.926}, {\"text\": \"their\", \"start\": 18.042, \"end\": 18.227}, {\"text\": \"terminal\", \"start\": 18.274, \"end\": 18.622}, {\"text\": \"velocity\", \"start\": 18.657, \"end\": 19.133}, {\"text\": \"revealing\", \"start\": 19.214, \"end\": 19.655}, {\"text\": \"their\", \"start\": 19.702, \"end\": 19.841}, {\"text\": \"mass.\", \"start\": 19.899, \"end\": 20.468}, {\"text\": \"Then,\", \"start\": 20.979, \"end\": 21.362}, {\"text\": \"an\", \"start\": 21.409, \"end\": 21.525}, {\"text\": \"electric\", \"start\": 21.583, \"end\": 21.989}, {\"text\": \"field\", \"start\": 22.059, \"end\": 22.291}, {\"text\": \"is\", \"start\": 22.337, \"end\": 22.407}, {\"text\": \"applied,\", \"start\": 22.442, \"end\": 23.034}, {\"text\": \"causing\", \"start\": 23.243, \"end\": 23.568}, {\"text\": \"the\", \"start\": 23.614, \"end\": 23.684}, {\"text\": \"charged\", \"start\": 23.731, \"end\": 24.125}, {\"text\": \"drops\", \"start\": 24.172, \"end\": 24.497}, {\"text\": \"to\", \"start\": 24.532, \"end\": 24.601}, {\"text\": \"rise\", \"start\": 24.717, \"end\": 25.101}, {\"text\": \"or\", \"start\": 25.147, \"end\": 25.24}, {\"text\": \"hover.\", \"start\": 25.298, \"end\": 25.797}, {\"text\": \"By\", \"start\": 26.308, \"end\": 26.447}, {\"text\": \"meticulously\", \"start\": 26.517, \"end\": 27.19}, {\"text\": \"balancing\", \"start\": 27.26, \"end\": 27.759}, {\"text\": \"gravitational\", \"start\": 27.817, \"end\": 28.595}, {\"text\": \"and\", \"start\": 28.642, \"end\": 28.711}, {\"text\": \"electric\", \"start\": 28.758, \"end\": 29.106}, {\"text\": \"forces,\", \"start\": 29.176, \"end\": 29.826}, {\"text\": \"Millikan\", \"start\": 30.07, \"end\": 30.476}, {\"text\": \"calculated\", \"start\": 30.557, \"end\": 31.114}, {\"text\": \"the\", \"start\": 31.149, \"end\": 31.219}, {\"text\": \"charge\", \"start\": 31.277, \"end\": 31.637}, {\"text\": \"on\", \"start\": 31.672, \"end\": 31.753}, {\"text\": \"each\", \"start\": 31.823, \"end\": 32.055}, {\"text\": \"drop.\", \"start\": 32.113, \"end\": 32.635}, {\"text\": \"He\", \"start\": 32.96, \"end\": 33.077}, {\"text\": \"discovered\", \"start\": 33.135, \"end\": 33.634}, {\"text\": \"all\", \"start\": 33.715, \"end\": 33.936}, {\"text\": \"charges\", \"start\": 34.017, \"end\": 34.505}, {\"text\": \"were\", \"start\": 34.563, \"end\": 34.702}, {\"text\": \"integer\", \"start\": 34.748, \"end\": 35.12}, {\"text\": \"multiples\", \"start\": 35.19, \"end\": 35.689}, {\"text\": \"of\", \"start\": 35.735, \"end\": 35.793}, {\"text\": \"a\", \"start\": 35.84, \"end\": 35.863}, {\"text\": \"single,\", \"start\": 35.921, \"end\": 36.327}, {\"text\": \"fundamental\", \"start\": 36.362, \"end\": 36.943}, {\"text\": \"unit:\", \"start\": 37.024, \"end\": 37.442}, {\"text\": \"the\", \"start\": 37.721, \"end\": 37.813}, {\"text\": \"electron's\", \"start\": 37.86, \"end\": 38.406}, {\"text\": \"charge,\", \"start\": 38.464, \"end\": 38.974}, {\"text\": \"1.602\", \"start\": 39.149, \"end\": 40.31}, {\"text\": \"x\", \"start\": 40.82, \"end\": 40.913}, {\"text\": \"10^-19\", \"start\": 40.983, \"end\": 42.678}, {\"text\": \"Coulombs.\", \"start\": 42.771, \"end\": 43.7}], \"sheet_row\": 4, \"start_time\": 1774430053251} }];"}}], "connections": {"Manual Trigger": {"main": [[{"node": "Test Data", "type": "main", "index": 0}]]}, "Test Data": {"main": [[{"node": "Extract Payload", "type": "main", "index": 0}]]}, "Stage 2 Webhook": {"main": [[{"node": "Extract Payload", "type": "main", "index": 0}]]}, "Extract Payload": {"main": [[{"node": "Submit Clips to Wavespeed", "type": "main", "index": 0}]]}, "Submit Clips to Wavespeed": {"main": [[{"node": "Wait 20 Seconds", "type": "main", "index": 0}]]}, "Wait 20 Seconds": {"main": [[{"node": "Check Clip Status", "type": "main", "index": 0}]]}, "Check Clip Status": {"main": [[{"node": "All Clips Ready?", "type": "main", "index": 0}]]}, "All Clips Ready?": {"main": [[{"node": "Assemble Video", "type": "main", "index": 0}], [{"node": "Wait 20 Seconds", "type": "main", "index": 0}]]}, "Assemble Video": {"main": [[{"node": "Read Final Video", "type": "main", "index": 0}]]}, "Read Final Video": {"main": [[{"node": "Upload Animation to Drive", "type": "main", "index": 0}]]}, "Upload Animation to Drive": {"main": [[{"node": "Make Animation Public", "type": "main", "index": 0}]]}, "Make Animation Public": {"main": [[{"node": "Stage 2 Done", "type": "main", "index": 0}]]}, "Stage 2 Done": {"main": [[{"node": "Notify Stage2 Done", "type": "main", "index": 0}]]}}, "active": true, "settings": {"executionOrder": "v1", "saveManualExecutions": true}, "id": "physics-stage2-pipeline", "tags": [{"name": "physics-channel"}, {"name": "stage2"}]}
+{
+  "name": "Physics Channel - Stage 2 - Video Generation",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "nodeManualTrigger",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        880,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: {\"job_id\": \"8\", \"topic\": \"Quantum Tunneling\", \"title\": \"Quantum Tunneling: The Impossible Leap\", \"hashtags\": \"#QuantumTunneling #Physics #ScienceExplained\", \"narration\": \"Quantum tunneling lets particles pass through walls they have no energy to cross. Imagine a wave packet hitting an energy barrier. A small part of the wave bleeds through the wall. This allows particles to tunnel, defying classical physics. Scanning Tunneling Microscopes measure this effect. Electrons tunnel across a tiny gap to map atoms. This phenomenon powers stars and enables modern electronics. Quantum tunneling makes the impossible, physically possible.\", \"clip_prompts\": [\"Extreme macro slow push-in, shimmering iridescent wave packet, approaching and partially passing through a dark opaque energy barrier, high contrast blue glow against deep black, subtle energy haze, photorealistic 3D scientific visualization\", \"Static locked frame, wave packet visualization, interacting with a sharp, defined energy barrier, showing amplitude decay within the barrier, high contrast purple glow, deep matte black background, photorealistic 3D scientific visualization\", \"Extreme macro slow push-in, faint ghostly glow of the wave packet, appearing on the other side of the energy barrier, probabilistic diffusion, high contrast gold bloom, subtle particle dust, photorealistic 3D scientific visualization\", \"Slow rotating orbit, sharp metallic STM tip hovering millimeters above a conductive surface, small voltage applied, visible tunneling current as faint blue sparks, high contrast, deep black background, photorealistic 3D scientific visualization\", \"Extreme macro slow push-in, STM tip scanning a surface, revealing individual atoms as subtle bumps in a false-color map, fluctuating tunneling current visualized as pulsing light, high contrast red and cyan, deep matte black background, photorealistic 3D scientific visualization\", \"Rapid zoom from cosmic to quantum scale, transitioning from a stellar fusion reaction to integrated circuits, showing electrons tunneling through barriers, vibrant gold and electric blue energy flows, vast cosmic void to intricate circuitry, photorealistic 3D scientific visualization\"], \"audio_path\": \"/data/ffmpeg/input/8_narration.mp3\", \"subs_path\": \"/data/ffmpeg/input/8_subs.json\", \"audio_duration\": 30.558, \"subtitle_chunks\": [{\"text\": \"Quantum tunneling lets\", \"start\": 0, \"end\": 1.227, \"words\": [{\"text\": \"Quantum\", \"start\": 0, \"end\": 0.453}, {\"text\": \"tunneling\", \"start\": 0.511, \"end\": 0.917}, {\"text\": \"lets\", \"start\": 0.987, \"end\": 1.219}]}, {\"text\": \"particles pass through\", \"start\": 1.277, \"end\": 2.481, \"words\": [{\"text\": \"particles\", \"start\": 1.277, \"end\": 1.788}, {\"text\": \"pass\", \"start\": 1.869, \"end\": 2.194}, {\"text\": \"through\", \"start\": 2.241, \"end\": 2.485}]}, {\"text\": \"walls they have\", \"start\": 2.531, \"end\": 3.27, \"words\": [{\"text\": \"walls\", \"start\": 2.531, \"end\": 2.914}, {\"text\": \"they\", \"start\": 2.961, \"end\": 3.077}, {\"text\": \"have\", \"start\": 3.111, \"end\": 3.251}]}, {\"text\": \"no energy to\", \"start\": 3.32, \"end\": 4.06, \"words\": [{\"text\": \"no\", \"start\": 3.32, \"end\": 3.506}, {\"text\": \"energy\", \"start\": 3.599, \"end\": 3.947}, {\"text\": \"to\", \"start\": 3.994, \"end\": 4.04}]}, {\"text\": \"cross. Imagine a\", \"start\": 4.11, \"end\": 5.639, \"words\": [{\"text\": \"cross.\", \"start\": 4.11, \"end\": 4.748}, {\"text\": \"Imagine\", \"start\": 5.074, \"end\": 5.561}, {\"text\": \"a\", \"start\": 5.596, \"end\": 5.619}]}, {\"text\": \"wave packet hitting\", \"start\": 5.689, \"end\": 6.73, \"words\": [{\"text\": \"wave\", \"start\": 5.689, \"end\": 6.002}, {\"text\": \"packet\", \"start\": 6.049, \"end\": 6.444}, {\"text\": \"hitting\", \"start\": 6.502, \"end\": 6.745}]}, {\"text\": \"an energy barrier.\", \"start\": 6.78, \"end\": 8.056, \"words\": [{\"text\": \"an\", \"start\": 6.78, \"end\": 6.838}, {\"text\": \"energy\", \"start\": 6.908, \"end\": 7.256}, {\"text\": \"barrier.\", \"start\": 7.314, \"end\": 7.906}]}, {\"text\": \"A small part\", \"start\": 8.231, \"end\": 8.983, \"words\": [{\"text\": \"A\", \"start\": 8.231, \"end\": 8.313}, {\"text\": \"small\", \"start\": 8.394, \"end\": 8.707}, {\"text\": \"part\", \"start\": 8.789, \"end\": 8.998}]}, {\"text\": \"of the wave\", \"start\": 9.033, \"end\": 9.726, \"words\": [{\"text\": \"of\", \"start\": 9.033, \"end\": 9.091}, {\"text\": \"the\", \"start\": 9.125, \"end\": 9.195}, {\"text\": \"wave\", \"start\": 9.253, \"end\": 9.694}]}, {\"text\": \"bleeds through the\", \"start\": 9.776, \"end\": 10.573, \"words\": [{\"text\": \"bleeds\", \"start\": 9.776, \"end\": 10.24}, {\"text\": \"through\", \"start\": 10.275, \"end\": 10.484}, {\"text\": \"the\", \"start\": 10.507, \"end\": 10.577}]}, {\"text\": \"wall. This allows\", \"start\": 10.623, \"end\": 12.048, \"words\": [{\"text\": \"wall.\", \"start\": 10.623, \"end\": 11.157}, {\"text\": \"This\", \"start\": 11.482, \"end\": 11.68}, {\"text\": \"allows\", \"start\": 11.726, \"end\": 12.028}]}, {\"text\": \"particles to tunnel,\", \"start\": 12.098, \"end\": 13.429, \"words\": [{\"text\": \"particles\", \"start\": 12.098, \"end\": 12.574}, {\"text\": \"to\", \"start\": 12.632, \"end\": 12.725}, {\"text\": \"tunnel,\", \"start\": 12.794, \"end\": 13.305}]}, {\"text\": \"defying classical physics.\", \"start\": 13.479, \"end\": 15.417, \"words\": [{\"text\": \"defying\", \"start\": 13.479, \"end\": 14.025}, {\"text\": \"classical\", \"start\": 14.095, \"end\": 14.571}, {\"text\": \"physics.\", \"start\": 14.629, \"end\": 15.267}]}, {\"text\": \"Scanning Tunneling Microscopes\", \"start\": 16.219, \"end\": 18.05, \"words\": [{\"text\": \"Scanning\", \"start\": 16.219, \"end\": 16.73}, {\"text\": \"Tunneling\", \"start\": 16.823, \"end\": 17.264}, {\"text\": \"Microscopes\", \"start\": 17.334, \"end\": 18.019}]}, {\"text\": \"measure this effect.\", \"start\": 18.1, \"end\": 19.295, \"words\": [{\"text\": \"measure\", \"start\": 18.1, \"end\": 18.414}, {\"text\": \"this\", \"start\": 18.448, \"end\": 18.576}, {\"text\": \"effect.\", \"start\": 18.623, \"end\": 19.145}]}, {\"text\": \"Electrons tunnel across\", \"start\": 19.528, \"end\": 20.895, \"words\": [{\"text\": \"Electrons\", \"start\": 19.528, \"end\": 20.143}, {\"text\": \"tunnel\", \"start\": 20.19, \"end\": 20.457}, {\"text\": \"across\", \"start\": 20.515, \"end\": 20.898}]}, {\"text\": \"a tiny gap\", \"start\": 20.945, \"end\": 21.765, \"words\": [{\"text\": \"a\", \"start\": 20.945, \"end\": 20.979}, {\"text\": \"tiny\", \"start\": 21.049, \"end\": 21.409}, {\"text\": \"gap\", \"start\": 21.479, \"end\": 21.757}]}, {\"text\": \"to map atoms.\", \"start\": 21.815, \"end\": 23.01, \"words\": [{\"text\": \"to\", \"start\": 21.815, \"end\": 21.885}, {\"text\": \"map\", \"start\": 21.978, \"end\": 22.21}, {\"text\": \"atoms.\", \"start\": 22.291, \"end\": 22.86}]}, {\"text\": \"This phenomenon powers\", \"start\": 23.243, \"end\": 24.389, \"words\": [{\"text\": \"This\", \"start\": 23.243, \"end\": 23.441}, {\"text\": \"phenomenon\", \"start\": 23.487, \"end\": 23.975}, {\"text\": \"powers\", \"start\": 24.033, \"end\": 24.404}]}, {\"text\": \"stars and enables\", \"start\": 24.439, \"end\": 25.388, \"words\": [{\"text\": \"stars\", \"start\": 24.439, \"end\": 24.845}, {\"text\": \"and\", \"start\": 24.88, \"end\": 24.962}, {\"text\": \"enables\", \"start\": 25.008, \"end\": 25.356}]}, {\"text\": \"modern electronics. Quantum\", \"start\": 25.438, \"end\": 27.454, \"words\": [{\"text\": \"modern\", \"start\": 25.438, \"end\": 25.751}, {\"text\": \"electronics.\", \"start\": 25.786, \"end\": 26.61}, {\"text\": \"Quantum\", \"start\": 27.051, \"end\": 27.446}]}, {\"text\": \"tunneling makes the\", \"start\": 27.504, \"end\": 28.244, \"words\": [{\"text\": \"tunneling\", \"start\": 27.504, \"end\": 27.876}, {\"text\": \"makes\", \"start\": 27.922, \"end\": 28.119}, {\"text\": \"the\", \"start\": 28.166, \"end\": 28.236}]}, {\"text\": \"impossible, physically possible.\", \"start\": 28.294, \"end\": 30.508, \"words\": [{\"text\": \"impossible,\", \"start\": 28.294, \"end\": 29.106}, {\"text\": \"physically\", \"start\": 29.28, \"end\": 29.757}, {\"text\": \"possible.\", \"start\": 29.815, \"end\": 30.558}]}], \"sheet_row\": 11, \"clips_count\": 6, \"video_urls\": [\"https://d1q70pf5vjeyhc.cloudfront.net/predictions/432554fc4e6c4b4c9bedd5a2ba109907/1.mp4\", \"https://d1q70pf5vjeyhc.cloudfront.net/predictions/92b78bc600ac45068697c0c560605782/1.mp4\", \"https://d1q70pf5vjeyhc.cloudfront.net/predictions/bbd689fc232b4c22b4ad72d772c3da02/1.mp4\", \"https://d1q70pf5vjeyhc.cloudfront.net/predictions/0459b9c92cc64634bb9752b8e12dfd24/1.mp4\", \"https://d1q70pf5vjeyhc.cloudfront.net/predictions/1867e0d3dfd5484f942b2a3ec3b979f2/1.mp4\", \"https://d1q70pf5vjeyhc.cloudfront.net/predictions/5fade970565c47c4bab0303755f62bcc/1.mp4\"]} }];"
+      },
+      "id": "nodeSampleData",
+      "name": "Assemble Test Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "stage2-video",
+        "options": {}
+      },
+      "id": "node1",
+      "name": "Stage 2 Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        224,
+        304
+      ],
+      "webhookId": "physics-stage2-video"
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json;\nconst body = (raw.body !== undefined) ? raw.body : raw;\nif (!body.job_id) throw new Error('Payload missing: job_id');\nif (!Array.isArray(body.clip_prompts) || body.clip_prompts.length < 1) throw new Error('Payload must have clip_prompts array (got: ' + JSON.stringify(body.clip_prompts) + ')');\nreturn [{ json: {\n  job_id: body.job_id,\n  topic: body.topic,\n  title: body.title,\n  hashtags: body.hashtags,\n  narration: body.narration,\n  clip_prompts: body.clip_prompts,\n  audio_path: body.audio_path,\n  subs_path: body.subs_path,\n  audio_duration: body.audio_duration,\n  subtitle_chunks: body.subtitle_chunks,\n  word_timings: body.word_timings,\n  sheet_row: body.sheet_row || null,\n  start_time: body.start_time || Date.now()\n} }];"
+      },
+      "id": "node2",
+      "name": "Extract Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        304
+      ],
+      "disabled": false
+    },
+    {
+      "parameters": {
+        "jsCode": "const { execSync } = require('child_process');\nconst fs = require('fs');\n\nconst data           = $input.first().json;\nconst jobId          = data.job_id;\nconst videoUrls      = data.video_urls;\nconst subtitleChunks = data.subtitle_chunks || [];\nconst audioDuration  = data.audio_duration || 30;\nconst N              = videoUrls.length;\n\nconst n8nIn   = '/data/ffmpeg/input';\nconst n8nOut  = '/data/ffmpeg/output';\nconst contIn  = '/ffmpeg/input';\nconst contOut = '/ffmpeg/output';\n\nif (!fs.existsSync(n8nIn))  fs.mkdirSync(n8nIn,  { recursive: true });\nif (!fs.existsSync(n8nOut)) fs.mkdirSync(n8nOut, { recursive: true });\n\nfunction run(cmd, timeout) {\n  let out = '';\n  try { out = execSync(cmd, { encoding: 'utf-8', timeout: timeout || 120000 }); }\n  catch(e) { out = ((e.stdout || '') + (e.stderr || '') + (e.message || '')).toString(); }\n  return out;\n}\n\nconsole.log('Assembling ' + N + ' clips | audio: ' + audioDuration.toFixed(1) + 's');\n\n// ━ STEP 1: Download all clips ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nfor (let i = 0; i < N; i++) {\n  const dest = contIn + '/' + jobId + '_clip' + i + '.mp4';\n  const out = run(\n    'docker exec ffmpeg-runner curl -sL --max-time 90 -o \"' + dest + '\" \"' + videoUrls[i] + '\" && echo DL_OK',\n    100000\n  );\n  if (!out.includes('DL_OK'))\n    throw new Error('Clip ' + i + ' download failed: ' + out.slice(-200));\n}\n\n// ━ STEP 2: Normalize each clip to 1080x1920 (9:16) — clips are already 5s from API ━\nfor (let i = 0; i < N; i++) {\n  const src  = contIn  + '/' + jobId + '_clip' + i + '.mp4';\n  const norm = contIn  + '/' + jobId + '_clip' + i + '_norm.mp4';\n  const out  = run(\n    'docker exec ffmpeg-runner ffmpeg -y -i \"' + src + '\" ' +\n    '-vf \"scale=1080:1920:force_original_aspect_ratio=decrease,' +\n         'pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black\" ' +\n    '-r 24 -c:v libx264 -crf 20 -preset fast -an \"' + norm + '\" 2>&1 && echo NORM_OK',\n    180000\n  );\n  if (!out.includes('NORM_OK'))\n    throw new Error('Normalize clip ' + i + ' failed: ' + out.slice(-300));\n}\n\n// ━ STEP 3: Concat with XFADE transitions ━━━━━━━━━━━━━━━━━━━━━━━━\nconst FADE_DUR = 0.3;\nconst CLIP_DUR = 5.0;  // each clip trimmed to 5s\nconst NET      = CLIP_DUR - FADE_DUR; // 4.7s net per clip → 6 clips = ~30s total\n\nlet withTransitions;\nif (N === 1) {\n  withTransitions = contIn + '/' + jobId + '_clip0_norm.mp4';\n} else {\n  const inputs  = Array.from({ length: N }, (_, i) =>\n    '-i \"' + contIn + '/' + jobId + '_clip' + i + '_norm.mp4\"'\n  ).join(' ');\n\n  let filterParts = [];\n  let prevLabel   = '[0:v]';\n  for (let i = 1; i < N; i++) {\n    const offset   = (i * NET).toFixed(1);\n    const outLabel = (i === N - 1) ? '[vout]' : '[x' + i + ']';\n    filterParts.push(prevLabel + '[' + i + ':v]xfade=transition=fade:duration=' + FADE_DUR + ':offset=' + offset + outLabel);\n    prevLabel = outLabel;\n  }\n  const filterComplex = filterParts.join('; ');\n  const xfadeOut = contIn + '/' + jobId + '_xfade.mp4';\n  const xfadeCmd =\n    'docker exec ffmpeg-runner ffmpeg -y ' + inputs + ' ' +\n    '-filter_complex \"' + filterComplex + '\" ' +\n    '-map \"[vout]\" -c:v libx264 -crf 20 -preset fast \"' + xfadeOut + '\" 2>&1 && echo XFADE_OK';\n  const out = run(xfadeCmd, 600000);\n  if (!out.includes('XFADE_OK'))\n    throw new Error('xfade failed: ' + out.slice(-500));\n  withTransitions = xfadeOut;\n}\n\n// ━ STEP 4: Write ASS subtitle file (Premium Highlighting) ━━━━━━━━\nfunction toAssTime(sec) {\n  const h = Math.floor(sec / 3600);\n  const m = Math.floor((sec % 3600) / 60);\n  const s = Math.floor(sec % 60);\n  const ms = Math.floor((sec % 1) * 100);\n  return h + ':' + String(m).padStart(2,\"0\") + ':' + String(s).padStart(2,\"0\") + '.' + String(ms).padStart(2,\"0\");\n}\n\nlet ass = `[Script Info]\\nScriptType: v4.00+\\nPlayResX: 1080\\nPlayResY: 1920\\n\\n[V4+ Styles]\\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\\nStyle: Default,Arial,70,&H00FFFFFF,&H000000FF,&H00000000,&HA0000000,1,0,1,4,2,2,60,60,320,1\\n\\n[Events]\\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\\n`;\n\nfor (const group of subtitleChunks) {\n  const words = group.words || [];\n  if (!words.length) continue;\n\n  const chunkEnd = words[words.length - 1].end;\n\n  for (let i = 0; i < words.length; i++) {\n    const lineStart = words[i].start;\n    // Stretch each line to next word start — closes gaps that cause blinking\n    const lineEnd = (i < words.length - 1) ? words[i + 1].start : chunkEnd;\n\n    // Fade in on chunk open, fade out on chunk close\n    let fadeTag = '';\n    if      (i === 0 && words.length > 1)  fadeTag = '{\\\\fad(80,0)}';\n    else if (i === words.length - 1)        fadeTag = '{\\\\fad(0,80)}';\n    else if (words.length === 1)            fadeTag = '{\\\\fad(80,80)}';\n\n    // Color-only highlight — no scale change avoids layout jitter\n    let displayText = fadeTag;\n    for (let j = 0; j < words.length; j++) {\n      if (i === j) {\n        displayText += '{\\\\c&H0000FFFF&}' + words[j].text + '{\\\\c&HFFFFFF&}';\n      } else {\n        displayText += words[j].text;\n      }\n      if (j < words.length - 1) displayText += ' ';\n    }\n    ass += 'Dialogue: 0,' + toAssTime(lineStart) + ',' + toAssTime(lineEnd) + ',Default,,0,0,0,,' + displayText + '\\n';\n  }\n}\nconst assN8nPath = n8nIn + '/' + jobId + '.ass';\nfs.writeFileSync(assN8nPath, ass, 'utf-8');\n\n// ━ STEP 5: Final ─ video + narration audio + burned subtitles ━━━━\nconst assContPath  = contIn  + '/' + jobId + '.ass';\nconst audioContPath = contIn + '/' + jobId + '_narration.mp3';\nconst finalContPath = contOut + '/' + jobId + '_final.mp4';\n// Get exact audio duration so video = audio length exactly\nconst probeOut = run(\n  'docker exec ffmpeg-runner ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 \"' + audioContPath + '\"',\n  15000\n);\nconst exactAudioDur = parseFloat(probeOut.trim()) || audioDuration;\nconst clipsDuration = N * CLIP_DUR - (N - 1) * FADE_DUR;\nconst stopDuration  = Math.max(0, exactAudioDur - clipsDuration);\nconsole.log('Audio: ' + exactAudioDur.toFixed(3) + 's | Clips: ' + clipsDuration.toFixed(1) + 's | FadeToBlack: ' + stopDuration.toFixed(3) + 's');\n// tpad extends with black frames, then fade filter fades the last stopDuration seconds to black\n// Result: smooth cinematic fade to black while audio finishes — no frozen frame\nconst subFilter = \"subtitles='\" + assContPath + \"',tpad=stop_mode=add:color=black:stop_duration=\" + stopDuration.toFixed(3) + \",fade=t=out:st=\" + clipsDuration.toFixed(3) + \":d=\" + stopDuration.toFixed(3);\n\nconst finalCmd =\n  'docker exec ffmpeg-runner ffmpeg -y ' +\n  '-i \"' + withTransitions + '\" ' +\n  '-i \"' + audioContPath + '\" ' +\n  '-vf \"' + subFilter + '\" ' +\n  '-c:v libx264 -crf 17 -preset medium ' +\n  '-c:a aac -b:a 192k ' +\n  '-movflags +faststart ' +\n  '-shortest ' +\n  '\"' + finalContPath + '\" 2>&1 && echo FINAL_OK';\n\nconst finalOut = run(finalCmd, 900000);\nif (!finalOut.includes('FINAL_OK'))\n  throw new Error('Final assembly failed: ' + finalOut.slice(-600));\n\nconst n8nFinalPath = n8nOut + '/' + jobId + '_final.mp4';\nif (!fs.existsSync(n8nFinalPath))\n  throw new Error('Final video missing: ' + n8nFinalPath);\n\nreturn [{ json: {\n  ...data,\n  output_filename:  jobId + '_final.mp4',\n  final_video_path: n8nFinalPath,\n  clips_used:       N,\n  audio_duration:   audioDuration\n}}];\n"
+      },
+      "id": "Assemble Video",
+      "name": "Assemble Video",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1536,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst item = $input.first().json;\nconst filePath = item.final_video_path;\n\nif (!fs.existsSync(filePath)) {\n  throw new Error('Final video not found at: ' + filePath);\n}\n\nconst buffer = fs.readFileSync(filePath);\n\nreturn [{\n  json: item,\n  binary: {\n    data: {\n      data: buffer.toString('base64'),\n      mimeType: 'video/mp4',\n      fileName: item.output_filename,\n      fileExtension: 'mp4'\n    }\n  }\n}];"
+      },
+      "id": "node5",
+      "name": "Read Final Video",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "name": "={{ $('Assemble Video').first().json.output_filename }}",
+        "driveId": {
+          "__rl": true,
+          "value": "MyDrive",
+          "mode": "list",
+          "cachedResultName": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "={{ $env.GOOGLE_DRIVE_FOLDER_ID }}",
+          "mode": "id"
+        },
+        "options": {
+          "simplifyOutput": false
+        }
+      },
+      "id": "node6",
+      "name": "Upload Animation to Drive",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        1984,
+        304
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "QUGEpurbhr31d8QZ",
+          "name": "Google Drive account 3"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://www.googleapis.com/drive/v3/files/' + $json.id + '/permissions' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleDriveOAuth2Api",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "type",
+              "value": "anyone"
+            },
+            {
+              "name": "role",
+              "value": "reader"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "node7",
+      "name": "Make Animation Public",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        2208,
+        304
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "QUGEpurbhr31d8QZ",
+          "name": "Google Drive account 3"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const driveNode    = $('Upload Animation to Drive').first().json;\nconst assembleData = $('Assemble Video').first().json;\nconst fileId = driveNode.id;\n\n// assembleData spreads the full original payload (including sheet_row, topic, title, etc.)\n// Works for both Webhook path and Manual Trigger path\nconst videoUrl      = 'https://drive.google.com/uc?export=download&id=' + fileId;\nconst renderTimeSec = Math.round((Date.now() - assembleData.start_time) / 1000);\n\nconsole.log('Stage 2 complete. Job: ' + assembleData.job_id + ', Drive file: ' + fileId + ', Time: ' + renderTimeSec + 's');\n\nreturn [{ json: {\n  job_id:              assembleData.job_id,\n  topic:               assembleData.topic,\n  title:               assembleData.title,\n  video_url:           videoUrl,\n  drive_file_id:       fileId,\n  render_time_seconds: renderTimeSec,\n  sheet_row:           assembleData.sheet_row,\n  status:              'stage2_complete'\n} }];"
+      },
+      "id": "node8",
+      "name": "Stage 2 Done",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2432,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ 'https://sheets.googleapis.com/v4/spreadsheets/1ns6J4yI4avUFvYZS1Tu97DQpy2z7t22PbA2tvUO824g/values/Content%20Master%20Table!L' + $('Stage 2 Done').first().json.sheet_row + '?valueInputOption=USER_ENTERED' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleDriveOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ majorDimension: \"ROWS\", values: [[\"STAGE2_COMPLETE\"]] }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "node9",
+      "name": "Notify Stage2 Done",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        2640,
+        304
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "QUGEpurbhr31d8QZ",
+          "name": "Google Drive account 3"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const assemble   = $('Assemble Video').first().json;\nconst stage2Done = $('Stage 2 Done').first().json;\nreturn [{ json: {\n  job_id:           stage2Done.job_id,\n  title:            stage2Done.title,\n  topic:            stage2Done.topic,\n  narration:        assemble.narration || '',\n  description:      assemble.narration ? assemble.narration.slice(0, 300) + '...' : (stage2Done.topic + ' – explained simply.'),\n  hashtags:         assemble.hashtags || '',\n  final_video_path: assemble.final_video_path,\n  output_filename:  assemble.output_filename,\n  drive_file_id:    stage2Done.drive_file_id,\n  drive_video_url:  stage2Done.video_url,\n  sheet_row:        stage2Done.sheet_row,\n  callback_url:     null\n}}];"
+      },
+      "id": "node10",
+      "name": "Build Stage 3 Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2864,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:5678/webhook/stage3-social-upload",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "node11",
+      "name": "Trigger Stage 3",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        3088,
+        304
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const https = require('https');\nconst data = $input.first().json;\nconst apiKey = $env.WAVESPEED_API_KEY;\nconst clipPrompts = data.clip_prompts;\nconst negativePrompts = data.negative_prompts || [];\nconst defaultNeg = 'text, letters, alphabet, messy, distorted, watermark';\n\nif (!Array.isArray(clipPrompts) || clipPrompts.length === 0)\n  throw new Error('No clip_prompts in payload');\n\nconst audioDuration = data.audio_duration || 30;\nconst clipsNeeded   = clipPrompts.length; // Stage 1 already calculated exact count (6 for 30s)\nconsole.log('Audio duration: ' + audioDuration.toFixed(1) + 's → generating ' + clipsNeeded + ' clips (5s each)');\n\nfunction apiPost(body) {\n  return new Promise((resolve, reject) => {\n    const buf = Buffer.from(JSON.stringify(body));\n    const req = https.request({\n      hostname: 'api.wavespeed.ai',\n      path: '/api/v3/bytedance/seedance-v1-lite-t2v-720p',\n      method: 'POST',\n      headers: {\n        'Authorization': 'Bearer ' + apiKey,\n        'Content-Type': 'application/json',\n        'Content-Length': buf.length\n      }\n    }, (res) => {\n      const chunks = [];\n      res.on('data', c => chunks.push(c));\n      res.on('end', () => {\n        try { resolve(JSON.parse(Buffer.concat(chunks).toString())); }\n        catch(e) { reject(new Error('Bad JSON from Wavespeed')); }\n      });\n    });\n    req.on('error', reject);\n    req.write(buf);\n    req.end();\n  });\n}\n\nconst submitPromises = [];\nfor (let i = 0; i < clipsNeeded; i++) {\n  submitPromises.push(\n    apiPost({\n      prompt:          clipPrompts[i],\n      negative_prompt: negativePrompts[i] || defaultNeg,\n      aspect_ratio:    '9:16',\n      duration:        5,\n      seed:            -1\n    })\n  );\n}\n\nconst results = await Promise.all(submitPromises);\n\nconst task_ids = [];\nfor (let i = 0; i < results.length; i++) {\n  const r = results[i];\n  if (!r.data || !r.data.id) throw new Error('Wavespeed submit failed: ' + JSON.stringify(r));\n  task_ids.push(r.data.id);\n}\n\nreturn [{ json: {\n  ...data,\n  task_ids,\n  clips_count: clipsNeeded,\n  video_urls:  new Array(clipsNeeded).fill(null),\n  poll_attempt: 0,\n  all_done:    false\n}}];\n"
+      },
+      "id": "nodeSubmit",
+      "name": "Submit Clips to Wavespeed",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 20,
+        "unit": "seconds"
+      },
+      "id": "nodeWait",
+      "name": "Wait 20 Seconds",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [
+        928,
+        320
+      ],
+      "webhookId": "wavespeed-poll-resume"
+    },
+    {
+      "parameters": {
+        "jsCode": "const https = require('https');\nconst data = $input.first().json;\nconst apiKey = $env.WAVESPEED_API_KEY;\nconst task_ids   = data.task_ids;\nconst video_urls = [...(data.video_urls || [null, null, null])];\nconst attempt    = (data.poll_attempt || 0) + 1;\n\nconsole.log('--- Poll attempt #' + attempt + ' ---');\n\nfunction apiGet(taskId) {\n  return new Promise((resolve, reject) => {\n    const req = https.request({\n      hostname: 'api.wavespeed.ai',\n      path: '/api/v3/predictions/' + taskId + '/result',\n      method: 'GET',\n      headers: { 'Authorization': 'Bearer ' + apiKey }\n    }, (res) => {\n      const chunks = [];\n      res.on('data', c => chunks.push(c));\n      res.on('end', () => {\n        const raw = Buffer.concat(chunks).toString();\n        try { resolve(JSON.parse(raw)); }\n        catch(e) { reject(new Error('Non-JSON from Wavespeed status [HTTP ' + res.statusCode + ']: ' + raw.slice(0,200))); }\n      });\n    });\n    req.on('error', reject);\n    req.end();\n  });\n}\n\n// Check each clip that is not yet complete\nfor (let i = 0; i < task_ids.length; i++) {\n  if (video_urls[i] !== null) {\n    console.log('Clip ' + i + ' already done, skipping');\n    continue;\n  }\n\n  const r = await apiGet(task_ids[i]);\n  const status = (r.data && r.data.status) || 'unknown';\n  console.log('Clip ' + i + ' [' + task_ids[i] + '] status: ' + status);\n\n  if (status === 'completed') {\n    const url = r.data.outputs && r.data.outputs[0];\n    if (!url) throw new Error('Clip ' + i + ' completed but output URL missing');\n    video_urls[i] = url;\n    console.log('Clip ' + i + ' ready: ' + url);\n  } else if (status === 'failed') {\n    throw new Error('Clip ' + i + ' FAILED: ' + JSON.stringify(r.data));\n  } else {\n    console.log('Clip ' + i + ' still ' + status + ' – will retry in 20s');\n  }\n}\n\nconst all_done = video_urls.every(u => u !== null) ? 1 : 0;\nconst pending  = video_urls.filter(u => u === null).length;\n\nif (all_done === 1) {\n  console.log('All clips are ready! Proceeding to assembly.');\n} else {\n  console.log(pending + ' clip(s) still generating. Waiting 20s before next poll.');\n}\n\nreturn [{ json: {\n  ...data,\n  task_ids,\n  video_urls,\n  poll_attempt: attempt,\n  all_done\n}}];\n"
+      },
+      "id": "nodeCheck",
+      "name": "Check Clip Status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1104,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "b038c74c-a3ae-4272-b32a-c63509a60055",
+              "leftValue": "={{ $json.all_done }}",
+              "rightValue": "1",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1312,
+        352
+      ],
+      "id": "f8a4a922-6304-433e-989e-1be87a3c4dab",
+      "name": "If"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Assemble Test Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stage 2 Webhook": {
+      "main": [
+        [
+          {
+            "node": "Extract Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Payload": {
+      "main": [
+        [
+          {
+            "node": "Submit Clips to Wavespeed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Submit Clips to Wavespeed": {
+      "main": [
+        [
+          {
+            "node": "Wait 20 Seconds",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 20 Seconds": {
+      "main": [
+        [
+          {
+            "node": "Check Clip Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Clip Status": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assemble Video": {
+      "main": [
+        [
+          {
+            "node": "Read Final Video",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Final Video": {
+      "main": [
+        [
+          {
+            "node": "Upload Animation to Drive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload Animation to Drive": {
+      "main": [
+        [
+          {
+            "node": "Make Animation Public",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Make Animation Public": {
+      "main": [
+        [
+          {
+            "node": "Stage 2 Done",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stage 2 Done": {
+      "main": [
+        [
+          {
+            "node": "Notify Stage2 Done",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Stage2 Done": {
+      "main": [
+        [
+          {
+            "node": "Build Stage 3 Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Stage 3 Payload": {
+      "main": [
+        [
+          {
+            "node": "Trigger Stage 3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Assemble Video",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait 20 Seconds",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assemble Test Payload": {
+      "main": [
+        [
+          {
+            "node": "Assemble Video",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "versionId": "203f178c-3d87-4d62-9b30-cd8d7395bfb6",
+  "meta": {
+    "instanceId": "a5cde20d7c9edf7b8607b553d4ec2ac68eba916ae21a61409c2b0f10aa8b4620"
+  },
+  "id": "yYw37H9rmiA2fDzG",
+  "tags": []
+}
