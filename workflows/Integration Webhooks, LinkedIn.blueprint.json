@@ -1,0 +1,938 @@
+{
+    "name": "Multi-Platform Social Poster (LinkedIn + Instagram + TikTok + Twitter)",
+    "flow": [
+        {
+            "id": 1,
+            "module": "gateway:CustomWebHook",
+            "version": 1,
+            "parameters": {
+                "hook": 2758401,
+                "maxResults": 1
+            },
+            "mapper": {},
+            "metadata": {
+                "designer": {
+                    "x": -600,
+                    "y": 0
+                },
+                "restore": {
+                    "parameters": {
+                        "hook": {
+                            "data": {
+                                "editable": "true"
+                            },
+                            "label": "social-media-post-webhook"
+                        }
+                    }
+                },
+                "parameters": [
+                    {
+                        "name": "hook",
+                        "type": "hook:gateway-webhook",
+                        "label": "Webhook",
+                        "required": true
+                    },
+                    {
+                        "name": "maxResults",
+                        "type": "number",
+                        "label": "Maximum number of results"
+                    }
+                ]
+            }
+        },
+        {
+            "id": 2,
+            "module": "flow:Router",
+            "version": 1,
+            "parameters": {},
+            "mapper": {},
+            "metadata": {
+                "designer": {
+                    "x": -200,
+                    "y": 0
+                }
+            },
+            "routes": [
+                {
+                    "label": "LinkedIn Image",
+                    "filter": {
+                        "name": "LinkedIn + Image",
+                        "conditions": [
+                            [
+                                {
+                                    "a": "{{1.platform}}",
+                                    "b": "linkedin",
+                                    "o": "text:equal"
+                                },
+                                {
+                                    "a": "{{1.post_type}}",
+                                    "b": "image",
+                                    "o": "text:equal"
+                                }
+                            ]
+                        ]
+                    },
+                    "flow": [
+                        {
+                            "id": 3,
+                            "module": "linkedin:createOrganizationImagePost",
+                            "version": 2,
+                            "parameters": {
+                                "__IMTCONN__": 6332124
+                            },
+                            "mapper": {
+                                "imageUrl": "{{1.media_url}}",
+                                "content": "{{1.caption}}",
+                                "visibility": "PUBLIC",
+                                "organization": "urn:li:organization:113343251",
+                                "feedDistribution": "MAIN_FEED",
+                                "isReshareDisabledByAuthor": false
+                            },
+                            "metadata": {
+                                "designer": {
+                                    "x": 200,
+                                    "y": -900
+                                },
+                                "restore": {
+                                    "parameters": {
+                                        "__IMTCONN__": {
+                                            "data": {
+                                                "scoped": "true",
+                                                "connection": "linkedin-openid"
+                                            },
+                                            "label": "My LinkedIn (OpenID Connect) connection (Sandesh Neupane)"
+                                        }
+                                    },
+                                    "expect": {
+                                        "visibility": {
+                                            "mode": "edit"
+                                        },
+                                        "organization": {
+                                            "mode": "edit"
+                                        },
+                                        "feedDistribution": {
+                                            "mode": "chose",
+                                            "label": "Main feed"
+                                        },
+                                        "isReshareDisabledByAuthor": {
+                                            "mode": "chose"
+                                        }
+                                    }
+                                },
+                                "parameters": [
+                                    {
+                                        "name": "__IMTCONN__",
+                                        "type": "account:linkedin2,linkedin-openid",
+                                        "label": "Connection",
+                                        "required": true
+                                    }
+                                ],
+                                "expect": [
+                                    {
+                                        "name": "organization",
+                                        "type": "select",
+                                        "label": "Company",
+                                        "required": true
+                                    },
+                                    {
+                                        "name": "imageUrl",
+                                        "type": "text",
+                                        "label": "Image URL",
+                                        "required": true
+                                    },
+                                    {
+                                        "name": "content",
+                                        "type": "text",
+                                        "label": "Content",
+                                        "required": true
+                                    },
+                                    {
+                                        "name": "visibility",
+                                        "type": "select",
+                                        "label": "Visibility",
+                                        "required": true,
+                                        "validate": {
+                                            "enum": [
+                                                "PUBLIC",
+                                                "LOGGED_IN"
+                                            ]
+                                        }
+                                    },
+                                    {
+                                        "name": "feedDistribution",
+                                        "type": "select",
+                                        "label": "Feed Distribution",
+                                        "required": true,
+                                        "validate": {
+                                            "enum": [
+                                                "MAIN_FEED",
+                                                "NONE"
+                                            ]
+                                        }
+                                    },
+                                    {
+                                        "name": "isReshareDisabledByAuthor",
+                                        "type": "boolean",
+                                        "label": "Is Reshare Disabled",
+                                        "required": true
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "label": "LinkedIn Video",
+                    "filter": {
+                        "name": "LinkedIn + Video",
+                        "conditions": [
+                            [
+                                {
+                                    "a": "{{1.platform}}",
+                                    "b": "linkedin",
+                                    "o": "text:equal"
+                                },
+                                {
+                                    "a": "{{1.post_type}}",
+                                    "b": "video",
+                                    "o": "text:equal"
+                                }
+                            ]
+                        ]
+                    },
+                    "flow": [
+                        {
+                            "id": 4,
+                            "module": "linkedin:createOrganizationVideoPost",
+                            "version": 2,
+                            "parameters": {
+                                "__IMTCONN__": 6332124
+                            },
+                            "mapper": {
+                                "url": "{{1.media_url}}",
+                                "title": "{{1.title}}",
+                                "method": "link",
+                                "content": "{{1.caption}}",
+                                "visibility": "PUBLIC",
+                                "organization": "urn:li:organization:113343251",
+                                "feedDistribution": "MAIN_FEED",
+                                "isReshareDisabledByAuthor": false
+                            },
+                            "metadata": {
+                                "designer": {
+                                    "x": 200,
+                                    "y": -650
+                                },
+                                "restore": {
+                                    "parameters": {
+                                        "__IMTCONN__": {
+                                            "data": {
+                                                "scoped": "true",
+                                                "connection": "linkedin-openid"
+                                            },
+                                            "label": "My LinkedIn (OpenID Connect) connection (Sandesh Neupane)"
+                                        }
+                                    },
+                                    "expect": {
+                                        "method": {
+                                            "label": "Upload by link"
+                                        },
+                                        "visibility": {
+                                            "mode": "edit"
+                                        },
+                                        "organization": {
+                                            "mode": "edit"
+                                        },
+                                        "feedDistribution": {
+                                            "mode": "chose",
+                                            "label": "Main feed"
+                                        },
+                                        "isReshareDisabledByAuthor": {
+                                            "mode": "chose"
+                                        }
+                                    }
+                                },
+                                "parameters": [
+                                    {
+                                        "name": "__IMTCONN__",
+                                        "type": "account:linkedin2,linkedin-openid",
+                                        "label": "Connection",
+                                        "required": true
+                                    }
+                                ],
+                                "expect": [
+                                    {
+                                        "name": "organization",
+                                        "type": "select",
+                                        "label": "Company",
+                                        "required": true
+                                    },
+                                    {
+                                        "name": "method",
+                                        "type": "select",
+                                        "label": "Choose Upload Method",
+                                        "required": true,
+                                        "validate": {
+                                            "enum": [
+                                                "upload",
+                                                "link"
+                                            ]
+                                        }
+                                    },
+                                    {
+                                        "name": "title",
+                                        "type": "text",
+                                        "label": "Title"
+                                    },
+                                    {
+                                        "name": "content",
+                                        "type": "text",
+                                        "label": "Content",
+                                        "required": true
+                                    },
+                                    {
+                                        "name": "visibility",
+                                        "type": "select",
+                                        "label": "Visibility",
+                                        "required": true,
+                                        "validate": {
+                                            "enum": [
+                                                "PUBLIC",
+                                                "LOGGED_IN"
+                                            ]
+                                        }
+                                    },
+                                    {
+                                        "name": "feedDistribution",
+                                        "type": "select",
+                                        "label": "Feed Distribution",
+                                        "required": true,
+                                        "validate": {
+                                            "enum": [
+                                                "MAIN_FEED",
+                                                "NONE"
+                                            ]
+                                        }
+                                    },
+                                    {
+                                        "name": "isReshareDisabledByAuthor",
+                                        "type": "boolean",
+                                        "label": "Is Reshare Disabled",
+                                        "required": true
+                                    },
+                                    {
+                                        "name": "url",
+                                        "type": "text",
+                                        "label": "Video URL",
+                                        "required": true
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "label": "Instagram Image",
+                    "filter": {
+                        "name": "Instagram + Image",
+                        "conditions": [
+                            [
+                                {
+                                    "a": "{{1.platform}}",
+                                    "b": "instagram",
+                                    "o": "text:equal"
+                                },
+                                {
+                                    "a": "{{1.post_type}}",
+                                    "b": "image",
+                                    "o": "text:equal"
+                                }
+                            ]
+                        ]
+                    },
+                    "flow": [
+                        {
+                            "id": 5,
+                            "module": "instagram-business:createPhotoPost",
+                            "version": 1,
+                            "parameters": {
+                                "__IMTCONN__": 0
+                            },
+                            "mapper": {
+                                "pageId": "{{1.ig_page_id}}",
+                                "imageUrl": "{{1.media_url}}",
+                                "caption": "{{1.caption}}"
+                            },
+                            "metadata": {
+                                "designer": {
+                                    "x": 200,
+                                    "y": -400
+                                },
+                                "restore": {
+                                    "parameters": {
+                                        "__IMTCONN__": {
+                                            "data": {
+                                                "scoped": "true",
+                                                "connection": "instagram-business"
+                                            },
+                                            "label": "My Instagram for Business connection"
+                                        }
+                                    }
+                                },
+                                "parameters": [
+                                    {
+                                        "name": "__IMTCONN__",
+                                        "type": "account:instagram-business",
+                                        "label": "Connection",
+                                        "required": true
+                                    }
+                                ],
+                                "expect": [
+                                    {
+                                        "name": "pageId",
+                                        "type": "select",
+                                        "label": "Page ID",
+                                        "required": true
+                                    },
+                                    {
+                                        "name": "imageUrl",
+                                        "type": "text",
+                                        "label": "Image URL",
+                                        "required": true
+                                    },
+                                    {
+                                        "name": "caption",
+                                        "type": "text",
+                                        "label": "Caption"
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "label": "Instagram Reel (Video)",
+                    "filter": {
+                        "name": "Instagram + Video",
+                        "conditions": [
+                            [
+                                {
+                                    "a": "{{1.platform}}",
+                                    "b": "instagram",
+                                    "o": "text:equal"
+                                },
+                                {
+                                    "a": "{{1.post_type}}",
+                                    "b": "video",
+                                    "o": "text:equal"
+                                }
+                            ]
+                        ]
+                    },
+                    "flow": [
+                        {
+                            "id": 6,
+                            "module": "instagram-business:createReelPost",
+                            "version": 1,
+                            "parameters": {
+                                "__IMTCONN__": 0
+                            },
+                            "mapper": {
+                                "pageId": "{{1.ig_page_id}}",
+                                "videoUrl": "{{1.media_url}}",
+                                "caption": "{{1.caption}}",
+                                "shareToFeed": true
+                            },
+                            "metadata": {
+                                "designer": {
+                                    "x": 200,
+                                    "y": -150
+                                },
+                                "restore": {
+                                    "parameters": {
+                                        "__IMTCONN__": {
+                                            "data": {
+                                                "scoped": "true",
+                                                "connection": "instagram-business"
+                                            },
+                                            "label": "My Instagram for Business connection"
+                                        }
+                                    }
+                                },
+                                "parameters": [
+                                    {
+                                        "name": "__IMTCONN__",
+                                        "type": "account:instagram-business",
+                                        "label": "Connection",
+                                        "required": true
+                                    }
+                                ],
+                                "expect": [
+                                    {
+                                        "name": "pageId",
+                                        "type": "select",
+                                        "label": "Page ID",
+                                        "required": true
+                                    },
+                                    {
+                                        "name": "videoUrl",
+                                        "type": "text",
+                                        "label": "Video URL",
+                                        "required": true
+                                    },
+                                    {
+                                        "name": "caption",
+                                        "type": "text",
+                                        "label": "Caption"
+                                    },
+                                    {
+                                        "name": "shareToFeed",
+                                        "type": "boolean",
+                                        "label": "Share to Feed"
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "label": "TikTok Video",
+                    "filter": {
+                        "name": "TikTok + Video",
+                        "conditions": [
+                            [
+                                {
+                                    "a": "{{1.platform}}",
+                                    "b": "tiktok",
+                                    "o": "text:equal"
+                                },
+                                {
+                                    "a": "{{1.post_type}}",
+                                    "b": "video",
+                                    "o": "text:equal"
+                                }
+                            ]
+                        ]
+                    },
+                    "flow": [
+                        {
+                            "id": 7,
+                            "module": "http:ActionSendData",
+                            "version": 3,
+                            "parameters": {
+                                "handleErrors": false,
+                                "useNewZLibDecompress": true
+                            },
+                            "mapper": {
+                                "url": "https://open.tiktokapis.com/v2/post/publish/video/init/",
+                                "serializeUrl": false,
+                                "method": "post",
+                                "headers": [
+                                    {
+                                        "name": "Authorization",
+                                        "value": "Bearer YOUR_TIKTOK_ACCESS_TOKEN"
+                                    },
+                                    {
+                                        "name": "Content-Type",
+                                        "value": "application/json; charset=UTF-8"
+                                    }
+                                ],
+                                "queryParameters": {
+                                    "array": []
+                                },
+                                "bodyType": "raw",
+                                "contentType": "application/json",
+                                "body": "{\n  \"post_info\": {\n    \"title\": \"{{1.caption}}\",\n    \"privacy_level\": \"PUBLIC_TO_EVERYONE\",\n    \"disable_duet\": false,\n    \"disable_comment\": false,\n    \"disable_stitch\": false,\n    \"video_cover_timestamp_ms\": 1000\n  },\n  \"source_info\": {\n    \"source\": \"PULL_FROM_URL\",\n    \"video_url\": \"{{1.media_url}}\"\n  }\n}",
+                                "parseResponse": true,
+                                "timeout": 30,
+                                "followRedirect": true,
+                                "gzip": true,
+                                "rejectUnauthorized": true
+                            },
+                            "metadata": {
+                                "designer": {
+                                    "x": 200,
+                                    "y": 150
+                                },
+                                "parameters": [
+                                    {
+                                        "name": "handleErrors",
+                                        "type": "boolean",
+                                        "label": "Evaluate all states as errors (except for 2xx and 3xx)"
+                                    },
+                                    {
+                                        "name": "useNewZLibDecompress",
+                                        "type": "boolean",
+                                        "label": "Use new ZLib decompression"
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "label": "TikTok Image",
+                    "filter": {
+                        "name": "TikTok + Image",
+                        "conditions": [
+                            [
+                                {
+                                    "a": "{{1.platform}}",
+                                    "b": "tiktok",
+                                    "o": "text:equal"
+                                },
+                                {
+                                    "a": "{{1.post_type}}",
+                                    "b": "image",
+                                    "o": "text:equal"
+                                }
+                            ]
+                        ]
+                    },
+                    "flow": [
+                        {
+                            "id": 8,
+                            "module": "http:ActionSendData",
+                            "version": 3,
+                            "parameters": {
+                                "handleErrors": false,
+                                "useNewZLibDecompress": true
+                            },
+                            "mapper": {
+                                "url": "https://open.tiktokapis.com/v2/post/publish/content/init/",
+                                "serializeUrl": false,
+                                "method": "post",
+                                "headers": [
+                                    {
+                                        "name": "Authorization",
+                                        "value": "Bearer YOUR_TIKTOK_ACCESS_TOKEN"
+                                    },
+                                    {
+                                        "name": "Content-Type",
+                                        "value": "application/json; charset=UTF-8"
+                                    }
+                                ],
+                                "queryParameters": {
+                                    "array": []
+                                },
+                                "bodyType": "raw",
+                                "contentType": "application/json",
+                                "body": "{\n  \"post_info\": {\n    \"title\": \"{{1.caption}}\",\n    \"description\": \"{{1.caption}}\",\n    \"privacy_level\": \"PUBLIC_TO_EVERYONE\",\n    \"disable_comment\": false\n  },\n  \"source_info\": {\n    \"source\": \"PULL_FROM_URL\",\n    \"photo_cover_index\": 0,\n    \"photo_images\": [\"{{1.media_url}}\"]\n  },\n  \"post_mode\": \"DIRECT_POST\",\n  \"media_type\": \"PHOTO\"\n}",
+                                "parseResponse": true,
+                                "timeout": 30,
+                                "followRedirect": true,
+                                "gzip": true,
+                                "rejectUnauthorized": true
+                            },
+                            "metadata": {
+                                "designer": {
+                                    "x": 200,
+                                    "y": 400
+                                },
+                                "parameters": [
+                                    {
+                                        "name": "handleErrors",
+                                        "type": "boolean",
+                                        "label": "Evaluate all states as errors (except for 2xx and 3xx)"
+                                    },
+                                    {
+                                        "name": "useNewZLibDecompress",
+                                        "type": "boolean",
+                                        "label": "Use new ZLib decompression"
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "label": "Twitter Image",
+                    "filter": {
+                        "name": "Twitter + Image",
+                        "conditions": [
+                            [
+                                {
+                                    "a": "{{1.platform}}",
+                                    "b": "twitter",
+                                    "o": "text:equal"
+                                },
+                                {
+                                    "a": "{{1.post_type}}",
+                                    "b": "image",
+                                    "o": "text:equal"
+                                }
+                            ]
+                        ]
+                    },
+                    "flow": [
+                        {
+                            "id": 9,
+                            "module": "http:ActionSendData",
+                            "version": 3,
+                            "parameters": {
+                                "handleErrors": false,
+                                "useNewZLibDecompress": true
+                            },
+                            "mapper": {
+                                "url": "https://upload.twitter.com/1.1/media/upload.json",
+                                "serializeUrl": false,
+                                "method": "post",
+                                "headers": [
+                                    {
+                                        "name": "Authorization",
+                                        "value": "OAuth oauth_consumer_key=\"YOUR_CONSUMER_KEY\", oauth_token=\"YOUR_ACCESS_TOKEN\", oauth_signature_method=\"HMAC-SHA1\", oauth_version=\"1.0\", oauth_timestamp=\"{{now}}\", oauth_nonce=\"{{uuid}}\", oauth_signature=\"YOUR_SIGNATURE\""
+                                    }
+                                ],
+                                "queryParameters": {
+                                    "array": [
+                                        {
+                                            "key": "media_url",
+                                            "value": "{{1.media_url}}"
+                                        }
+                                    ]
+                                },
+                                "bodyType": "raw",
+                                "contentType": "application/json",
+                                "body": "",
+                                "parseResponse": true,
+                                "timeout": 30,
+                                "followRedirect": true,
+                                "gzip": true,
+                                "rejectUnauthorized": true
+                            },
+                            "metadata": {
+                                "designer": {
+                                    "x": 200,
+                                    "y": 650
+                                },
+                                "parameters": [
+                                    {
+                                        "name": "handleErrors",
+                                        "type": "boolean",
+                                        "label": "Evaluate all states as errors (except for 2xx and 3xx)"
+                                    },
+                                    {
+                                        "name": "useNewZLibDecompress",
+                                        "type": "boolean",
+                                        "label": "Use new ZLib decompression"
+                                    }
+                                ]
+                            }
+                        },
+                        {
+                            "id": 10,
+                            "module": "http:ActionSendData",
+                            "version": 3,
+                            "parameters": {
+                                "handleErrors": false,
+                                "useNewZLibDecompress": true
+                            },
+                            "mapper": {
+                                "url": "https://api.twitter.com/2/tweets",
+                                "serializeUrl": false,
+                                "method": "post",
+                                "headers": [
+                                    {
+                                        "name": "Authorization",
+                                        "value": "OAuth oauth_consumer_key=\"YOUR_CONSUMER_KEY\", oauth_token=\"YOUR_ACCESS_TOKEN\", oauth_signature_method=\"HMAC-SHA1\", oauth_version=\"1.0\", oauth_timestamp=\"{{now}}\", oauth_nonce=\"{{uuid}}\", oauth_signature=\"YOUR_SIGNATURE\""
+                                    },
+                                    {
+                                        "name": "Content-Type",
+                                        "value": "application/json"
+                                    }
+                                ],
+                                "queryParameters": {
+                                    "array": []
+                                },
+                                "bodyType": "raw",
+                                "contentType": "application/json",
+                                "body": "{\n  \"text\": \"{{1.caption}}\",\n  \"media\": {\n    \"media_ids\": [\"{{9.data.media_id_string}}\"]\n  }\n}",
+                                "parseResponse": true,
+                                "timeout": 30,
+                                "followRedirect": true,
+                                "gzip": true,
+                                "rejectUnauthorized": true
+                            },
+                            "metadata": {
+                                "designer": {
+                                    "x": 550,
+                                    "y": 650
+                                },
+                                "parameters": [
+                                    {
+                                        "name": "handleErrors",
+                                        "type": "boolean",
+                                        "label": "Evaluate all states as errors (except for 2xx and 3xx)"
+                                    },
+                                    {
+                                        "name": "useNewZLibDecompress",
+                                        "type": "boolean",
+                                        "label": "Use new ZLib decompression"
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "label": "Twitter Video",
+                    "filter": {
+                        "name": "Twitter + Video",
+                        "conditions": [
+                            [
+                                {
+                                    "a": "{{1.platform}}",
+                                    "b": "twitter",
+                                    "o": "text:equal"
+                                },
+                                {
+                                    "a": "{{1.post_type}}",
+                                    "b": "video",
+                                    "o": "text:equal"
+                                }
+                            ]
+                        ]
+                    },
+                    "flow": [
+                        {
+                            "id": 11,
+                            "module": "http:ActionSendData",
+                            "version": 3,
+                            "parameters": {
+                                "handleErrors": false,
+                                "useNewZLibDecompress": true
+                            },
+                            "mapper": {
+                                "url": "https://upload.twitter.com/1.1/media/upload.json",
+                                "serializeUrl": false,
+                                "method": "post",
+                                "headers": [
+                                    {
+                                        "name": "Authorization",
+                                        "value": "OAuth oauth_consumer_key=\"YOUR_CONSUMER_KEY\", oauth_token=\"YOUR_ACCESS_TOKEN\", oauth_signature_method=\"HMAC-SHA1\", oauth_version=\"1.0\", oauth_timestamp=\"{{now}}\", oauth_nonce=\"{{uuid}}\", oauth_signature=\"YOUR_SIGNATURE\""
+                                    }
+                                ],
+                                "queryParameters": {
+                                    "array": [
+                                        {
+                                            "key": "command",
+                                            "value": "INIT"
+                                        },
+                                        {
+                                            "key": "media_type",
+                                            "value": "video/mp4"
+                                        },
+                                        {
+                                            "key": "media_category",
+                                            "value": "tweet_video"
+                                        }
+                                    ]
+                                },
+                                "bodyType": "raw",
+                                "contentType": "application/json",
+                                "body": "{\n  \"media_url\": \"{{1.media_url}}\"\n}",
+                                "parseResponse": true,
+                                "timeout": 30,
+                                "followRedirect": true,
+                                "gzip": true,
+                                "rejectUnauthorized": true
+                            },
+                            "metadata": {
+                                "designer": {
+                                    "x": 200,
+                                    "y": 900
+                                },
+                                "parameters": [
+                                    {
+                                        "name": "handleErrors",
+                                        "type": "boolean",
+                                        "label": "Evaluate all states as errors (except for 2xx and 3xx)"
+                                    },
+                                    {
+                                        "name": "useNewZLibDecompress",
+                                        "type": "boolean",
+                                        "label": "Use new ZLib decompression"
+                                    }
+                                ]
+                            }
+                        },
+                        {
+                            "id": 12,
+                            "module": "http:ActionSendData",
+                            "version": 3,
+                            "parameters": {
+                                "handleErrors": false,
+                                "useNewZLibDecompress": true
+                            },
+                            "mapper": {
+                                "url": "https://api.twitter.com/2/tweets",
+                                "serializeUrl": false,
+                                "method": "post",
+                                "headers": [
+                                    {
+                                        "name": "Authorization",
+                                        "value": "OAuth oauth_consumer_key=\"YOUR_CONSUMER_KEY\", oauth_token=\"YOUR_ACCESS_TOKEN\", oauth_signature_method=\"HMAC-SHA1\", oauth_version=\"1.0\", oauth_timestamp=\"{{now}}\", oauth_nonce=\"{{uuid}}\", oauth_signature=\"YOUR_SIGNATURE\""
+                                    },
+                                    {
+                                        "name": "Content-Type",
+                                        "value": "application/json"
+                                    }
+                                ],
+                                "queryParameters": {
+                                    "array": []
+                                },
+                                "bodyType": "raw",
+                                "contentType": "application/json",
+                                "body": "{\n  \"text\": \"{{1.caption}}\",\n  \"media\": {\n    \"media_ids\": [\"{{11.data.media_id_string}}\"]\n  }\n}",
+                                "parseResponse": true,
+                                "timeout": 30,
+                                "followRedirect": true,
+                                "gzip": true,
+                                "rejectUnauthorized": true
+                            },
+                            "metadata": {
+                                "designer": {
+                                    "x": 550,
+                                    "y": 900
+                                },
+                                "parameters": [
+                                    {
+                                        "name": "handleErrors",
+                                        "type": "boolean",
+                                        "label": "Evaluate all states as errors (except for 2xx and 3xx)"
+                                    },
+                                    {
+                                        "name": "useNewZLibDecompress",
+                                        "type": "boolean",
+                                        "label": "Use new ZLib decompression"
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+    ],
+    "metadata": {
+        "instant": true,
+        "version": 1,
+        "scenario": {
+            "roundtrips": 1,
+            "maxErrors": 3,
+            "autoCommit": true,
+            "autoCommitTriggerLast": true,
+            "sequential": false,
+            "slots": null,
+            "confidential": false,
+            "dataloss": false,
+            "dlq": false,
+            "freshVariables": false
+        },
+        "designer": {
+            "orphans": []
+        },
+        "zone": "eu1.make.com",
+        "notes": []
+    }
+}

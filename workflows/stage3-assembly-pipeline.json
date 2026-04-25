@@ -1,465 +1,465 @@
 {
-  "name": "Physics Channel - Stage 3 - Social Media Upload",
-  "nodes": [
-    {
-      "parameters": {
-        "httpMethod": "POST",
-        "path": "stage3-social-upload",
-        "responseMode": "onReceived",
-        "responseData": "firstEntryJson",
-        "options": {}
-      },
-      "id": "s3-n01",
-      "name": "Stage 3 Webhook",
-      "type": "n8n-nodes-base.webhook",
-      "typeVersion": 1,
-      "position": [
-        240,
-        300
-      ],
-      "webhookId": "physics-stage3-social"
-    },
-    {
-      "parameters": {},
-      "id": "s3-manual",
-      "name": "Manual Test Trigger",
-      "type": "n8n-nodes-base.manualTrigger",
-      "typeVersion": 1,
-      "position": [
-        240,
-        500
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "return [{ json: {\n  job_id: \"26\",\n  title: \"The Higgs Field: Unveiling Mass\",\n  topic: \"Higgs Boson\",\n  narration: \"The Higgs boson is a quantum ripple in a universal field. This field, the Higgs field, interacts with particles, giving them mass. At the LHC, protons collide, creating fleeting Higgs bosons. Detectors capture their decay products, reconstructing the invisible particle's signature.\",\n  description: \"The Higgs boson is a quantum ripple in a universal field. This field, the Higgs field, interacts with particles, giving them mass. At the LHC, protons collide, creating fleeting Higgs bosons. Detectors capture their decay products, reconstructing the invisible particle's signature.\",\n  hashtags: \"#HiggsBoson #ParticlePhysics #CERN #LHC #QuantumField\",\n  final_video_path: \"/data/ffmpeg/output/26_final.mp4\",\n  output_filename: \"26_final.mp4\",\n  drive_file_id: \"1GzzTD6VFDp3_zTMtKxeC28eg-tEBJz-D\",\n  drive_video_url: \"https://drive.google.com/uc?export=download&id=1GzzTD6VFDp3_zTMtKxeC28eg-tEBJz-D\",\n  sheet_row: 29,\n  callback_url: null\n}}];"
-      },
-      "id": "s3-manual-payload",
-      "name": "Test Payload",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        460,
-        500
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "const raw  = $input.first().json;\nconst body = (raw.body !== undefined) ? raw.body : raw;\nif (!body.job_id)           throw new Error('Stage 3 missing: job_id');\nif (!body.final_video_path) throw new Error('Stage 3 missing: final_video_path');\nif (!body.title)            throw new Error('Stage 3 missing: title');\nconst jobId = body.job_id;\nreturn [{ json: {\n  job_id:           jobId,\n  title:            body.title,\n  topic:            body.topic || body.title,\n  narration:        body.narration || '',\n  description:      body.description || body.topic || '',\n  hashtags:         body.hashtags || '',\n  final_video_path: body.final_video_path,\n  output_filename:  body.output_filename || (jobId + '_final.mp4'),\n  drive_file_id:    body.drive_file_id || null,\n  sheet_row:        body.sheet_row || null,\n  callback_url:     body.callback_url || null,\n  start_time:       Date.now()\n}}];"
-      },
-      "id": "s3-n02",
-      "name": "Extract S3 Payload",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        460,
-        300
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "const data = $input.first().json;\nconst title = data.title || 'Physics Discovery';\nconst topic = data.topic || title;\nconst narration = data.narration || data.description || topic;\n\nconst prompt = `You are the content writer for an advanced physics brand channel — authoritative, intellectually sharp, and engaging. Think PBS Space Time, Veritasium, or Scientific American — but for social media.\n\nVideo topic: \"${title}\"\n\nVideo context (STRICTLY USE THIS STORY AS THE FACTUAL CORE):\n\"${narration}\"\n\nWrite two platform posts based on the context above. Both posts must:\n- Be descriptive and engaging — Target exactly 230-260 words per post across 4 to 5 paragraphs.\n- NEVER use: \"I\", \"we\", \"in this video\", \"the narrator\".\n- NEVER use markdown formatting: no ** bold **, no * italic *, no __ underline __.\n- NEVER use special characters: no /, no $, no %, no &, no @, no ^, no ~, no |.\n- NEVER use bullet points, dashes, or numbered lists inside the caption body.\n- Use plain flowing prose only. Clean readable text with no symbols.\n- Each paragraph should be 2-4 sentences. Separate paragraphs with a blank line.\n\nFACEBOOK POST (230-260 words, 4-5 paragraphs):\n- Paragraph 1: Open with a striking physical fact or jaw-dropping hook from the narration.\n- Paragraph 2: Explain the core mechanism or phenomenon in accessible but precise language.\n- Paragraph 3: Deepen the story — connect it to a broader physical principle or real-world consequence.\n- Paragraph 4: Expand on why this matters — technology, discovery, or shift in understanding.\n- Paragraph 5 (optional): End with a sharp insight or open question to spark comments.\n\nLINKEDIN POST (230-260 words, 4-5 paragraphs):\n- Paragraph 1: Open with the professional/scientific core insight — authoritative and confident.\n- Paragraph 2: Explain the physics mechanism clearly and precisely.\n- Paragraph 3: Connect to the broader scientific or technological significance.\n- Paragraph 4: Discuss real-world implications — industry, research, or human understanding.\n- Paragraph 5: Close with a bold declarative statement about what this means for the future of science.\n\nHASHTAGS (20 tags):\n- 5 broad tags (#physics #science #stem etc.)\n- 15 specific tags matching the context\n\nYOUTUBE SHORTS DESCRIPTION (60-90 words):\n- One punchy hook sentence.\n- Interesting explanation building on the narration.\n- 3-5 hashtags at end.\n\nReturn ONLY raw JSON:\n{\n  \"facebook_caption\": \"...\",\n  \"linkedin_caption\": \"...\",\n  \"youtube_caption\": \"...\",\n  \"hashtags\": \"#tag1 #tag2 ...\"\n}`;\n\nreturn [{ json: {\n  ...data,\n  gemini_caption_request: {\n    contents: [{ parts: [{ text: prompt }] }],\n    generationConfig: {\n      maxOutputTokens: 2048,\n      temperature: 0.75,\n      responseMimeType: 'application/json'\n    }\n  }\n}}];"
-      },
-      "id": "s3-n03p",
-      "name": "Build Caption Prompt",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        700,
-        300
-      ]
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "={{ 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=' + $env.GOOGLE_AI_API_KEY }}",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            }
-          ]
+    "name": "Physics Channel - Stage 3 - Social Media Upload",
+    "nodes": [
+        {
+            "parameters": {
+                "httpMethod": "POST",
+                "path": "stage3-social-upload",
+                "responseMode": "onReceived",
+                "responseData": "firstEntryJson",
+                "options": {}
+            },
+            "id": "s3-n01",
+            "name": "Stage 3 Webhook",
+            "type": "n8n-nodes-base.webhook",
+            "typeVersion": 1,
+            "position": [
+                240,
+                300
+            ],
+            "webhookId": "physics-stage3-social"
         },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify($json.gemini_caption_request) }}",
-        "options": {
-          "timeout": 30000
-        }
-      },
-      "id": "s3-n03h",
-      "name": "Gemini Social Captions",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4,
-      "position": [
-        920,
-        300
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "const response = $input.first().json;\nconst data = $('Build Caption Prompt').first().json;\n\nif (!response.candidates || !response.candidates[0] || !response.candidates[0].content) {\n  console.warn('Gemini response empty â€” using fallback');\n  const tags = data.hashtags || '#physics #science #education';\n  const basic = data.title + '\\\\n\\\\n' + (data.description || data.topic) + '\\\\n\\\\n' + tags;\n  return [{ json: { ...data, facebook_caption: basic, linkedin_caption: basic, generated_hashtags: tags } }];\n}\n\nlet captions;\ntry {\n  const raw = response.candidates[0].content.parts[0].text.trim();\n  captions = JSON.parse(raw);\n} catch(e) {\n  console.warn('Caption JSON parse failed â€” using fallback');\n  const tags = data.hashtags || '#physics #science #education';\n  const basic = data.title + '\\\\n\\\\n' + (data.description || data.topic) + '\\\\n\\\\n' + tags;\n  captions = { facebook_caption: basic, linkedin_caption: basic, hashtags: tags };\n}\n\nreturn [{ json: {\n  ...data,\n  facebook_caption:   captions.facebook_caption,\n  linkedin_caption:   captions.linkedin_caption,\n  youtube_caption:    captions.youtube_caption || captions.linkedin_caption,\n  generated_hashtags: captions.hashtags\n}}];"
-      },
-      "id": "s3-n03r",
-      "name": "Parse Gemini Captions",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1140,
-        300
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "const { spawnSync } = require('child_process');\nconst fs = require('fs');\nconst data = $input.first().json;\nconst pageId = $env.FB_PAGE_ID;\nconst token = $env.FB_PAGE_ACCESS_TOKEN;\n\n// Path inside ffmpeg-runner container\nconst ffmpegPath = data.final_video_path.replace('/data/ffmpeg', '/ffmpeg');\nconst title = (data.title || '').slice(0, 255);\nconst desc = ((data.facebook_caption || '') + '\\n\\n' + (data.generated_hashtags || data.hashtags || '')).slice(0, 5000);\n\nconsole.log('FB Upload via curl: ' + ffmpegPath);\n\n// Write description to temp file â€” avoids all shell escaping issues\nfs.writeFileSync('/tmp/fb_desc.txt', desc);\nspawnSync('docker', ['cp', '/tmp/fb_desc.txt', 'ffmpeg-runner:/tmp/fb_desc.txt']);\n\n// Run curl multipart upload directly from ffmpeg-runner\n// -F 'description=</tmp/fb_desc.txt' reads file content as field value\nconst result = spawnSync('docker', [\n  'exec', 'ffmpeg-runner',\n  'curl', '-s', '--max-time', '300',\n  '-X', 'POST',\n  'https://graph-video.facebook.com/v18.0/' + pageId + '/videos',\n  '-F', 'access_token=' + token,\n  '-F', 'title=' + title,\n  '-F', 'description=</tmp/fb_desc.txt',\n  '-F', 'source=@' + ffmpegPath\n], { timeout: 320000 });\n\nif (result.error) throw new Error('curl spawn error: ' + result.error.message);\nif (result.status !== 0) throw new Error('curl failed: ' + result.stderr.toString());\n\nconst output = result.stdout.toString().trim();\nconsole.log('FB curl response: ' + output.slice(0, 200));\n\nlet parsed;\ntry { parsed = JSON.parse(output); }\ncatch(e) { throw new Error('FB response not JSON: ' + output.slice(0, 300)); }\n\nif (parsed.error) return [{ json: { ...data, fb_status: 'FAILED', fb_error: JSON.stringify(parsed.error), fb_video_id: null, fb_post_url: null } }];\nconst videoId = parsed.id || parsed.video_id;\nif (!videoId) return [{ json: { ...data, fb_status: 'FAILED', fb_error: 'No video ID: ' + output, fb_video_id: null, fb_post_url: null } }];\nconsole.log('FB upload complete: ' + videoId);\nreturn [{ json: { ...data, fb_status: 'SUCCESS', fb_video_id: videoId, fb_post_url: 'https://www.facebook.com/' + $env.FB_PAGE_ID + '/videos/' + videoId } }];"
-      },
-      "id": "s3-n04_upload",
-      "name": "FB: Upload Video",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1360,
-        50
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "return [$input.first()];"
-      },
-      "id": "s3-n04r",
-      "name": "Parse FB Response",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        2240,
-        50
-      ]
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "https://hook.eu1.make.com/cb6c71oflfuhk9k1y46jvuxvcuikswnm",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            }
-          ]
+        {
+            "parameters": {},
+            "id": "s3-manual",
+            "name": "Manual Test Trigger",
+            "type": "n8n-nodes-base.manualTrigger",
+            "typeVersion": 1,
+            "position": [
+                240,
+                500
+            ]
         },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\n  video_url: $json.drive_video_url,\n  title: $json.title,\n  text: ($json.linkedin_caption || '') + '\\n\\n' + ($json.generated_hashtags || '')\n}) }}",
-        "options": {
-          "timeout": 60000
+        {
+            "parameters": {
+                "jsCode": "return [{\n  json: {\n    \"job_id\": \"50\",\n    \"title\": \"Black Holes Don't Just Consume, They Radiate\",\n    \"topic\": \"Hawking Radiation\",\n    \"narration\": \"Black holes emit particles and slowly evaporate. Virtual particle pairs form near the event horizon. One particle falls in, the other escapes as real radiation. This energy loss causes the black hole's mass to diminish over eons. Eventually, it vanishes entirely, leaving only radiation.\",\n    \"description\": \"Black holes emit particles and slowly evaporate. Virtual particle pairs form near the event horizon. One particle falls in, the other escapes as real radiation. This energy loss causes the black hole's mass to diminish over eons. Eventually, it vanishes entirely, leaving only radiation.\",\n    \"hashtags\": \"#HawkingRadiation #BlackHoles #QuantumPhysics #Cosmology\",\n    \"final_video_path\": \"/data/ffmpeg/output/50_final.mp4\",\n    \"output_filename\": \"50_final.mp4\",\n    \"drive_file_id\": \"1X-vY4V0ASpLpZ6kMnBny15MqG33M7uoC\",\n    \"drive_video_url\": \"https://drive.google.com/uc?export=download&id=1X-vY4V0ASpLpZ6kMnBny15MqG33M7uoC\",\n    \"sheet_row\": 53,\n    \"callback_url\": null\n  }\n}];"
+            },
+            "id": "s3-manual-payload",
+            "name": "Test Payload",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                460,
+                500
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "const raw  = $input.first().json;\nconst body = (raw.body !== undefined) ? raw.body : raw;\nif (!body.job_id)           throw new Error('Stage 3 missing: job_id');\nif (!body.final_video_path) throw new Error('Stage 3 missing: final_video_path');\nif (!body.title)            throw new Error('Stage 3 missing: title');\nconst jobId = body.job_id;\nreturn [{ json: {\n  job_id:           jobId,\n  title:            body.title,\n  topic:            body.topic || body.title,\n  narration:        body.narration || '',\n  description:      body.description || body.topic || '',\n  hashtags:         body.hashtags || '',\n  final_video_path: body.final_video_path,\n  output_filename:  body.output_filename || (jobId + '_final.mp4'),\n  drive_file_id:    body.drive_file_id || null,\n  sheet_row:        body.sheet_row || null,\n  callback_url:     body.callback_url || null,\n  start_time:       Date.now()\n}}];"
+            },
+            "id": "s3-n02",
+            "name": "Extract S3 Payload",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                460,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "const data = $input.first().json;\nconst title = data.title || 'Physics Discovery';\nconst topic = data.topic || title;\nconst narration = data.narration || data.description || topic;\n\nconst prompt = `You are the content writer for an advanced physics brand channel — authoritative, intellectually sharp, and engaging. Think PBS Space Time, Veritasium, or Scientific American — but for social media.\n\nVideo topic: \"${title}\"\n\nVideo context (STRICTLY USE THIS STORY AS THE FACTUAL CORE):\n\"${narration}\"\n\nWrite four platform-specific posts based on the context above. ALL posts must:\n- NEVER use: \"I\", \"we\", \"in this video\", \"the narrator\".\n- NEVER use markdown formatting: no ** bold **, no * italic *, no __ underline __.\n- NEVER use special characters inside caption text: no /, no $, no %, no &, no @, no ^, no ~, no |.\n- NEVER use bullet points, dashes, or numbered lists inside the caption body.\n- Use plain flowing prose only. Clean readable text with no symbols.\n- EVERY platform post follows the SAME structure: exactly 5 content paragraphs totalling 250 words, then paragraph 6 with 10-15 hashtags only. No hashtags inside paragraphs 1-5.\n\nPARAGRAPH STRUCTURE (same for all platforms, tone varies):\n- Paragraph 1: Hook — 1-2 striking sentences from the narration that stop the scroll.\n- Paragraph 2: Explain the core mechanism or phenomenon clearly and simply. 3-4 sentences.\n- Paragraph 3: Deepen the story — broader physical principle or surprising implication. 3-4 sentences.\n- Paragraph 4: Why this matters — technology, discovery, or shift in understanding. 3-4 sentences.\n- Paragraph 5: Close with a powerful statement or engaging question. 1-2 sentences.\n- Paragraph 6 (hashtags only): 10-15 relevant hashtags separated by spaces.\n\nTONE PER PLATFORM:\n- FACEBOOK: conversational, wonder-driven, story-like. Hook with something surprising from the narration.\n- LINKEDIN: professional, authoritative, research-focused. Emphasize scientific significance and future implications.\n- INSTAGRAM: visual, punchy, exciting. Paragraph 5 must end with a question to drive comments.\n- TIKTOK: casual, energetic, short punchy sentences like talking to a curious friend.\n\nYOUTUBE SHORTS DESCRIPTION (separate format, 60-90 words):\n- One punchy hook sentence.\n- 2-3 sentences of interesting explanation from the narration.\n- 3-5 hashtags at end.\n\nReturn ONLY raw JSON:\n{\n  \"facebook_caption\": \"...\",\n  \"linkedin_caption\": \"...\",\n  \"instagram_caption\": \"...\",\n  \"tiktok_caption\": \"...\",\n  \"youtube_caption\": \"...\",\n  \"hashtags\": \"#tag1 #tag2 ...\"\n}`;\n\nreturn [{ json: {\n  ...data,\n  gemini_caption_request: {\n    contents: [{ parts: [{ text: prompt }] }],\n    generationConfig: {\n      maxOutputTokens: 8192,\n      temperature: 0.75,\n      responseMimeType: 'application/json'\n    }\n  }\n}}];"
+            },
+            "id": "s3-n03p",
+            "name": "Build Caption Prompt",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                700,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "={{ 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=' + $env.GOOGLE_AI_API_KEY }}",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Content-Type",
+                            "value": "application/json"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "specifyBody": "json",
+                "jsonBody": "={{ JSON.stringify($json.gemini_caption_request) }}",
+                "options": {
+                    "timeout": 30000
+                }
+            },
+            "id": "s3-n03h",
+            "name": "Gemini Social Captions",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                920,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "const response = $input.first().json;\nconst data = $('Build Caption Prompt').first().json;\n\nif (!response.candidates || !response.candidates[0] || !response.candidates[0].content) {\n  console.warn('Gemini response empty — using fallback');\n  const tags = data.hashtags || '#physics #science #education';\n  const basic = data.title + '\\n\\n' + (data.description || data.topic) + '\\n\\n' + tags;\n  return [{ json: { ...data, facebook_caption: basic, linkedin_caption: basic, generated_hashtags: tags } }];\n}\n\nlet captions;\ntry {\n  const raw = response.candidates[0].content.parts[0].text.trim();\n  captions = JSON.parse(raw);\n} catch(e) {\n  console.warn('Caption JSON parse failed — using fallback');\n  const tags = data.hashtags || '#physics #science #education';\n  const basic = data.title + '\\n\\n' + (data.description || data.topic) + '\\n\\n' + tags;\n  captions = { facebook_caption: basic, linkedin_caption: basic, hashtags: tags };\n}\n\nreturn [{ json: {\n  ...data,\n  facebook_caption:   captions.facebook_caption,\n  linkedin_caption:   captions.linkedin_caption,\n  instagram_caption:  captions.instagram_caption || captions.facebook_caption,\n  tiktok_caption:     captions.tiktok_caption    || captions.youtube_caption,\n  youtube_caption:    captions.youtube_caption   || captions.linkedin_caption,\n  generated_hashtags: captions.hashtags\n}}];"
+            },
+            "id": "s3-n03r",
+            "name": "Parse Gemini Captions",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1140,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "const { spawnSync } = require('child_process');\nconst fs = require('fs');\nconst data = $input.first().json;\nconst pageId = $env.FB_PAGE_ID;\nconst token = $env.FB_PAGE_ACCESS_TOKEN;\n\nconst ffmpegPath = data.final_video_path.replace('/data/ffmpeg', '/ffmpeg');\nconst title = (data.title || '').slice(0, 255);\nconst desc = ((data.facebook_caption || '') + '\\n\\n' + (data.generated_hashtags || data.hashtags || '')).slice(0, 5000);\n\nconsole.log('FB Upload via curl: ' + ffmpegPath);\n\nfs.writeFileSync('/tmp/fb_desc.txt', desc);\nspawnSync('docker', ['cp', '/tmp/fb_desc.txt', 'ffmpeg-runner:/tmp/fb_desc.txt']);\n\nconst result = spawnSync('docker', [\n  'exec', 'ffmpeg-runner',\n  'curl', '-s', '--max-time', '300',\n  '-X', 'POST',\n  'https://graph-video.facebook.com/v18.0/' + pageId + '/videos',\n  '-F', 'access_token=' + token,\n  '-F', 'title=' + title,\n  '-F', 'description=</tmp/fb_desc.txt',\n  '-F', 'source=@' + ffmpegPath\n], { timeout: 320000 });\n\nif (result.error) throw new Error('curl spawn error: ' + result.error.message);\nif (result.status !== 0) throw new Error('curl failed: ' + result.stderr.toString());\n\nconst output = result.stdout.toString().trim();\nconsole.log('FB curl response: ' + output.slice(0, 200));\n\nlet parsed;\ntry { parsed = JSON.parse(output); }\ncatch(e) { throw new Error('FB response not JSON: ' + output.slice(0, 300)); }\n\nif (parsed.error) return [{ json: { ...data, fb_status: 'FAILED', fb_error: JSON.stringify(parsed.error), fb_video_id: null, fb_post_url: null } }];\nconst videoId = parsed.id || parsed.video_id;\nif (!videoId) return [{ json: { ...data, fb_status: 'FAILED', fb_error: 'No video ID: ' + output, fb_video_id: null, fb_post_url: null } }];\nconsole.log('FB upload complete: ' + videoId);\nreturn [{ json: { ...data, fb_status: 'SUCCESS', fb_video_id: videoId, fb_post_url: 'https://www.facebook.com/' + $env.FB_PAGE_ID + '/videos/' + videoId } }];"
+            },
+            "id": "s3-n04_upload",
+            "name": "FB: Upload Video",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1360,
+                50
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "return [$input.first()];"
+            },
+            "id": "s3-n04r",
+            "name": "Parse FB Response",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                2240,
+                50
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "https://hook.eu1.make.com/cb6c71oflfuhk9k1y46jvuxvcuikswnm",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Content-Type",
+                            "value": "application/json"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "specifyBody": "json",
+                "jsonBody": "={{ JSON.stringify({\n  post_type: 'video',\n  media_url: $json.drive_video_url,\n  title: $json.title,\n  linkedin_caption:  ($json.linkedin_caption  || '') + '\\n\\n' + ($json.generated_hashtags || ''),\n  instagram_caption: ($json.instagram_caption || '') + '\\n\\n' + ($json.generated_hashtags || ''),\n  tiktok_caption:    ($json.tiktok_caption    || '') + '\\n\\n' + ($json.generated_hashtags || '')\n}) }}",
+                "options": {
+                    "timeout": 60000
+                }
+            },
+            "id": "s3-n05_make",
+            "name": "LI: Make Webhook",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                1360,
+                480
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "const res  = $input.first().json;\nconst data = $('Parse Gemini Captions').first().json;\nconsole.log('Make.com LI response: ' + JSON.stringify(res));\nif (res && (res.status === 'accepted' || res.status === 'ok' || res.success === true || res.result)) {\n  return [{ json: { ...data, li_status: 'SUCCESS', li_post_id: res.id || res.postId || null, li_post_url: null } }];\n}\nreturn [{ json: { ...data, li_status: 'SENT_TO_MAKE', li_post_id: null, li_post_url: null, li_make_response: JSON.stringify(res) } }];"
+            },
+            "id": "s3-n05_res",
+            "name": "LI: Finalize",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1580,
+                480
+            ]
+        },
+        {
+            "parameters": {
+                "mode": "combine",
+                "combinationMode": "mergeByPosition",
+                "options": {}
+            },
+            "id": "s3-n06",
+            "name": "Merge Results",
+            "type": "n8n-nodes-base.merge",
+            "typeVersion": 3,
+            "position": [
+                1180,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "const data = $input.first().json;\nconst totalTimeSec = Math.round((Date.now() - (data.start_time || Date.now())) / 1000);\n\nconsole.log('=== Stage 3 Complete ===');\nconsole.log('Job:      ' + data.job_id);\nconsole.log('Title:    ' + data.title);\nconsole.log('Facebook: ' + (data.fb_status || 'N/A') + (data.fb_post_url ? ' → ' + data.fb_post_url : ''));\nconsole.log('LinkedIn: ' + (data.li_status || 'N/A') + (data.li_post_url ? ' → ' + data.li_post_url : ''));\nconsole.log('Time:     ' + totalTimeSec + 's');\n\nreturn [{ json: {\n  job_id:            data.job_id,\n  title:             data.title,\n  sheet_row:         data.sheet_row,\n  callback_url:      data.callback_url,\n  fb_status:         data.fb_status   || 'NOT_RUN',\n  fb_post_url:       data.fb_post_url  || null,\n  fb_video_id:       data.fb_video_id  || null,\n  li_status:         data.li_status   || 'NOT_RUN',\n  li_post_url:       data.li_post_url  || null,\n  li_post_id:        data.li_post_id   || null,\n  facebook_caption:  data.facebook_caption  || null,\n  linkedin_caption:  data.linkedin_caption  || null,\n  generated_hashtags:data.generated_hashtags || null,\n  publish_time_sec:  totalTimeSec,\n  status:            'stage3_complete'\n}}];"
+            },
+            "id": "s3-n07",
+            "name": "Build Social Summary",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1400,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "method": "PUT",
+                "url": "={{ 'https://sheets.googleapis.com/v4/spreadsheets/1ns6J4yI4avUFvYZS1Tu97DQpy2z7t22PbA2tvUO824g/values/Content%20Master%20Table!L' + $json.sheet_row + '?valueInputOption=USER_ENTERED' }}",
+                "authentication": "predefinedCredentialType",
+                "nodeCredentialType": "googleDriveOAuth2Api",
+                "sendBody": true,
+                "contentType": "json",
+                "body": "={{ JSON.stringify({ majorDimension: 'ROWS', values: [['PUBLISHED', 'FB: ' + ($json.fb_post_url || 'FAIL') + ' | LI: ' + ($json.li_post_url || 'FAIL')]] }) }}",
+                "options": {
+                    "timeout": 10000
+                }
+            },
+            "id": "s3-n08",
+            "name": "Update Sheet with URLs",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "continueOnFail": true,
+            "position": [
+                1620,
+                300
+            ],
+            "credentials": {
+                "googleDriveOAuth2Api": {
+                    "id": "QUGEpurbhr31d8QZ",
+                    "name": "Google Drive account 3"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "={{ $json.callback_url || 'http://localhost:5678/webhook/no-callback' }}",
+                "sendBody": true,
+                "contentType": "json",
+                "body": "={{ JSON.stringify({ job_id: $json.job_id, fb_post_url: $json.fb_post_url, fb_status: $json.fb_status, li_post_url: $json.li_post_url, li_status: $json.li_status, status: 'stage3_complete', publish_time_sec: $json.publish_time_sec }) }}",
+                "options": {
+                    "timeout": 30000
+                }
+            },
+            "id": "s3-n09",
+            "name": "Send Stage 3 Callback",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "continueOnFail": true,
+            "position": [
+                1840,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "const { spawnSync } = require('child_process');\nconst https = require('https');\n\nconst data = $input.first().json;\n\nconst clientId     = $env.YOUTUBE_OAUTH_CLIENT_ID;\nconst clientSecret = $env.YOUTUBE_OAUTH_CLIENT_SECRET;\nconst refreshToken = $env.YOUTUBE_REFRESH_TOKEN;\n\nif (!clientId || !clientSecret || !refreshToken)\n  throw new Error('Missing YouTube env vars — check YOUTUBE_OAUTH_CLIENT_ID / SECRET / REFRESH_TOKEN');\n\nconst tokenBody = [\n  'grant_type=refresh_token',\n  'client_id='     + encodeURIComponent(clientId),\n  'client_secret=' + encodeURIComponent(clientSecret),\n  'refresh_token=' + encodeURIComponent(refreshToken)\n].join('&');\n\nconst tokenRes = await new Promise((resolve, reject) => {\n  const req = https.request({\n    hostname: 'oauth2.googleapis.com',\n    path: '/token',\n    method: 'POST',\n    headers: {\n      'Content-Type':  'application/x-www-form-urlencoded',\n      'Content-Length': Buffer.byteLength(tokenBody)\n    }\n  }, res => {\n    let body = '';\n    res.on('data', c => body += c);\n    res.on('end', () => resolve({ status: res.statusCode, body }));\n  });\n  req.on('error', reject);\n  req.write(tokenBody);\n  req.end();\n});\n\nconst tokenData = JSON.parse(tokenRes.body);\nif (!tokenData.access_token)\n  throw new Error('YouTube token exchange failed: ' + tokenRes.body);\nconst accessToken = tokenData.access_token;\n\nconst title       = ((data.title || 'Physics Short') + ' #Shorts').slice(0, 100);\nconst ytCaption = (data.youtube_caption || data.linkedin_caption || data.facebook_caption || '').trim();\nconst ytTags    = (data.generated_hashtags || '').trim();\nconst description = (ytCaption + (ytTags ? ' ' + ytTags : '')).slice(0, 5000);\n\nconst metadata = JSON.stringify({\n  snippet: {\n    title,\n    description,\n    tags: ['physics', 'science', 'shorts', 'quantum', 'education'],\n    categoryId: '28'\n  },\n  status: {\n    privacyStatus: 'public',\n    selfDeclaredMadeForKids: false\n  }\n});\n\nconst initRes = await new Promise((resolve, reject) => {\n  const req = https.request({\n    hostname: 'www.googleapis.com',\n    path: '/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status',\n    method: 'POST',\n    headers: {\n      'Authorization':         'Bearer ' + accessToken,\n      'Content-Type':          'application/json',\n      'X-Upload-Content-Type': 'video/mp4',\n      'Content-Length':        Buffer.byteLength(metadata)\n    }\n  }, res => {\n    let body = '';\n    res.on('data', c => body += c);\n    res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body }));\n  });\n  req.on('error', reject);\n  req.write(metadata);\n  req.end();\n});\n\nconst uploadUrl = initRes.headers['location'];\nif (!uploadUrl)\n  throw new Error('No YouTube upload URL. Status: ' + initRes.status + ' Body: ' + initRes.body.slice(-300));\n\nconst vidPath = (data.final_video_path || '').replace('/data/ffmpeg', '/ffmpeg');\nif (!vidPath) throw new Error('No final_video_path in job data');\n\nconsole.log('YT upload: ' + vidPath + ' → ' + uploadUrl.slice(0, 80) + '...');\n\nconst uploadResult = spawnSync('docker', [\n  'exec', 'ffmpeg-runner',\n  'curl', '-s',\n  '--max-time', '600',\n  '-X', 'PUT',\n  uploadUrl,\n  '-H', 'Content-Type: video/mp4',\n  '--data-binary', '@' + vidPath\n], { timeout: 620000, encoding: 'utf-8' });\n\nconst stdout = (uploadResult.stdout || '').trim();\nlet ytResponse;\ntry { ytResponse = JSON.parse(stdout); } catch(e) { ytResponse = {}; }\n\nif (!ytResponse.id)\n  throw new Error('YouTube upload failed: ' + stdout.slice(-500));\n\nconsole.log('YT upload OK — video ID: ' + ytResponse.id);\n\nreturn [{ json: {\n  ...data,\n  yt_video_id:  ytResponse.id,\n  yt_video_url: 'https://www.youtube.com/shorts/' + ytResponse.id,\n  yt_status:    'SUCCESS'\n}}];"
+            },
+            "id": "s3-n05_yt",
+            "name": "YT: Upload Short",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1360,
+                270
+            ]
         }
-      },
-      "id": "s3-n05_make",
-      "name": "LI: Make Webhook",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4,
-      "position": [
-        1360,
-        480
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "const res  = $input.first().json;\nconst data = $('Parse Gemini Captions').first().json;\nconsole.log('Make.com LI response: ' + JSON.stringify(res));\nif (res && (res.status === 'accepted' || res.status === 'ok' || res.success === true || res.result)) {\n  return [{ json: { ...data, li_status: 'SUCCESS', li_post_id: res.id || res.postId || null, li_post_url: null } }];\n}\nreturn [{ json: { ...data, li_status: 'SENT_TO_MAKE', li_post_id: null, li_post_url: null, li_make_response: JSON.stringify(res) } }];"
-      },
-      "id": "s3-n05_res",
-      "name": "LI: Finalize",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1580,
-        480
-      ]
-    },
-    {
-      "parameters": {
-        "mode": "combine",
-        "combinationMode": "mergeByPosition",
-        "options": {}
-      },
-      "id": "s3-n06",
-      "name": "Merge Results",
-      "type": "n8n-nodes-base.merge",
-      "typeVersion": 3,
-      "position": [
-        1180,
-        300
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "const data = $input.first().json;\nconst totalTimeSec = Math.round((Date.now() - (data.start_time || Date.now())) / 1000);\n\nconsole.log('=== Stage 3 Complete ===');\nconsole.log('Job:      ' + data.job_id);\nconsole.log('Title:    ' + data.title);\nconsole.log('Facebook: ' + (data.fb_status || 'N/A') + (data.fb_post_url ? ' â†’ ' + data.fb_post_url : ''));\nconsole.log('LinkedIn: ' + (data.li_status || 'N/A') + (data.li_post_url ? ' â†’ ' + data.li_post_url : ''));\nconsole.log('Time:     ' + totalTimeSec + 's');\n\nreturn [{ json: {\n  job_id:            data.job_id,\n  title:             data.title,\n  sheet_row:         data.sheet_row,\n  callback_url:      data.callback_url,\n  fb_status:         data.fb_status   || 'NOT_RUN',\n  fb_post_url:       data.fb_post_url  || null,\n  fb_video_id:       data.fb_video_id  || null,\n  li_status:         data.li_status   || 'NOT_RUN',\n  li_post_url:       data.li_post_url  || null,\n  li_post_id:        data.li_post_id   || null,\n  facebook_caption:  data.facebook_caption  || null,\n  linkedin_caption:  data.linkedin_caption  || null,\n  generated_hashtags:data.generated_hashtags || null,\n  publish_time_sec:  totalTimeSec,\n  status:            'stage3_complete'\n}}];"
-      },
-      "id": "s3-n07",
-      "name": "Build Social Summary",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1400,
-        300
-      ]
-    },
-    {
-      "parameters": {
-        "method": "PUT",
-        "url": "={{ 'https://sheets.googleapis.com/v4/spreadsheets/1ns6J4yI4avUFvYZS1Tu97DQpy2z7t22PbA2tvUO824g/values/Content%20Master%20Table!L' + $json.sheet_row + '?valueInputOption=USER_ENTERED' }}",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "googleDriveOAuth2Api",
-        "sendBody": true,
-        "contentType": "json",
-        "body": "={{ JSON.stringify({ majorDimension: 'ROWS', values: [['PUBLISHED', 'FB: ' + ($json.fb_post_url || 'FAIL') + ' | LI: ' + ($json.li_post_url || 'FAIL')]] }) }}",
-        "options": {
-          "timeout": 10000
+    ],
+    "connections": {
+        "Stage 3 Webhook": {
+            "main": [
+                [
+                    {
+                        "node": "Extract S3 Payload",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Manual Test Trigger": {
+            "main": [
+                [
+                    {
+                        "node": "Test Payload",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Test Payload": {
+            "main": [
+                [
+                    {
+                        "node": "Build Caption Prompt",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Extract S3 Payload": {
+            "main": [
+                [
+                    {
+                        "node": "Build Caption Prompt",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Build Caption Prompt": {
+            "main": [
+                [
+                    {
+                        "node": "Gemini Social Captions",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Gemini Social Captions": {
+            "main": [
+                [
+                    {
+                        "node": "Parse Gemini Captions",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Parse Gemini Captions": {
+            "main": [
+                [
+                    {
+                        "node": "FB: Upload Video",
+                        "type": "main",
+                        "index": 0
+                    },
+                    {
+                        "node": "LI: Make Webhook",
+                        "type": "main",
+                        "index": 0
+                    },
+                    {
+                        "node": "YT: Upload Short",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "FB: Upload Video": {
+            "main": [
+                [
+                    {
+                        "node": "Parse FB Response",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Parse FB Response": {
+            "main": [
+                [
+                    {
+                        "node": "Merge Results",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "LI: Make Webhook": {
+            "main": [
+                [
+                    {
+                        "node": "LI: Finalize",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "LI: Finalize": {
+            "main": [
+                [
+                    {
+                        "node": "Merge Results",
+                        "type": "main",
+                        "index": 1
+                    }
+                ]
+            ]
+        },
+        "YT: Upload Short": {
+            "main": [
+                [
+                    {
+                        "node": "Merge Results",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Merge Results": {
+            "main": [
+                [
+                    {
+                        "node": "Build Social Summary",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Build Social Summary": {
+            "main": [
+                [
+                    {
+                        "node": "Update Sheet with URLs",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Update Sheet with URLs": {
+            "main": [
+                [
+                    {
+                        "node": "Send Stage 3 Callback",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
         }
-      },
-      "id": "s3-n08",
-      "name": "Update Sheet with URLs",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4,
-      "continueOnFail": true,
-      "position": [
-        1620,
-        300
-      ],
-      "credentials": {
-        "googleDriveOAuth2Api": {
-          "id": "QUGEpurbhr31d8QZ",
-          "name": "Google Drive account 3"
+    },
+    "active": true,
+    "settings": {
+        "executionOrder": "v1",
+        "saveManualExecutions": true
+    },
+    "id": "physics-stage3-pipeline",
+    "tags": [
+        {
+            "name": "physics-channel"
+        },
+        {
+            "name": "stage3"
         }
-      }
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "={{ $json.callback_url || 'http://localhost:5678/webhook/no-callback' }}",
-        "sendBody": true,
-        "contentType": "json",
-        "body": "={{ JSON.stringify({ job_id: $json.job_id, fb_post_url: $json.fb_post_url, fb_status: $json.fb_status, li_post_url: $json.li_post_url, li_status: $json.li_status, status: 'stage3_complete', publish_time_sec: $json.publish_time_sec }) }}",
-        "options": {
-          "timeout": 30000
-        }
-      },
-      "id": "s3-n09",
-      "name": "Send Stage 3 Callback",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4,
-      "continueOnFail": true,
-      "position": [
-        1840,
-        300
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "const { spawnSync } = require('child_process');\nconst https = require('https');\n\nconst data = $input.first().json;\n\nconst clientId     = $env.YOUTUBE_OAUTH_CLIENT_ID;\nconst clientSecret = $env.YOUTUBE_OAUTH_CLIENT_SECRET;\nconst refreshToken = $env.YOUTUBE_REFRESH_TOKEN;\n\nif (!clientId || !clientSecret || !refreshToken)\n  throw new Error('Missing YouTube env vars â€” check YOUTUBE_OAUTH_CLIENT_ID / SECRET / REFRESH_TOKEN');\n\n// â”€â”€ Step 1: Exchange refresh token for access token â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€\nconst tokenBody = [\n  'grant_type=refresh_token',\n  'client_id='     + encodeURIComponent(clientId),\n  'client_secret=' + encodeURIComponent(clientSecret),\n  'refresh_token=' + encodeURIComponent(refreshToken)\n].join('&');\n\nconst tokenRes = await new Promise((resolve, reject) => {\n  const req = https.request({\n    hostname: 'oauth2.googleapis.com',\n    path: '/token',\n    method: 'POST',\n    headers: {\n      'Content-Type':  'application/x-www-form-urlencoded',\n      'Content-Length': Buffer.byteLength(tokenBody)\n    }\n  }, res => {\n    let body = '';\n    res.on('data', c => body += c);\n    res.on('end', () => resolve({ status: res.statusCode, body }));\n  });\n  req.on('error', reject);\n  req.write(tokenBody);\n  req.end();\n});\n\nconst tokenData = JSON.parse(tokenRes.body);\nif (!tokenData.access_token)\n  throw new Error('YouTube token exchange failed: ' + tokenRes.body);\nconst accessToken = tokenData.access_token;\n\n// â”€â”€ Step 2: Initiate resumable upload â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€\nconst title       = ((data.title || 'Physics Short') + ' #Shorts').slice(0, 100);\nconst ytCaption = (data.youtube_caption || data.linkedin_caption || data.facebook_caption || '').trim();\nconst ytTags    = (data.generated_hashtags || '').trim();\nconst description = (ytCaption + (ytTags ? ' ' + ytTags : '')).slice(0, 5000);\n\nconst metadata = JSON.stringify({\n  snippet: {\n    title,\n    description,\n    tags: ['physics', 'science', 'shorts', 'quantum', 'education'],\n    categoryId: '28'\n  },\n  status: {\n    privacyStatus: 'public',\n    selfDeclaredMadeForKids: false\n  }\n});\n\nconst initRes = await new Promise((resolve, reject) => {\n  const req = https.request({\n    hostname: 'www.googleapis.com',\n    path: '/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status',\n    method: 'POST',\n    headers: {\n      'Authorization':         'Bearer ' + accessToken,\n      'Content-Type':          'application/json',\n      'X-Upload-Content-Type': 'video/mp4',\n      'Content-Length':        Buffer.byteLength(metadata)\n    }\n  }, res => {\n    let body = '';\n    res.on('data', c => body += c);\n    res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body }));\n  });\n  req.on('error', reject);\n  req.write(metadata);\n  req.end();\n});\n\nconst uploadUrl = initRes.headers['location'];\nif (!uploadUrl)\n  throw new Error('No YouTube upload URL. Status: ' + initRes.status + ' Body: ' + initRes.body.slice(-300));\n\n// â”€â”€ Step 3: Upload video via docker exec curl â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€\nconst vidPath = (data.final_video_path || '').replace('/data/ffmpeg', '/ffmpeg');\nif (!vidPath) throw new Error('No final_video_path in job data');\n\nconsole.log('YT upload: ' + vidPath + ' â†’ ' + uploadUrl.slice(0, 80) + '...');\n\nconst uploadResult = spawnSync('docker', [\n  'exec', 'ffmpeg-runner',\n  'curl', '-s',\n  '--max-time', '600',\n  '-X', 'PUT',\n  uploadUrl,\n  '-H', 'Content-Type: video/mp4',\n  '--data-binary', '@' + vidPath\n], { timeout: 620000, encoding: 'utf-8' });\n\nconst stdout = (uploadResult.stdout || '').trim();\nlet ytResponse;\ntry { ytResponse = JSON.parse(stdout); } catch(e) { ytResponse = {}; }\n\nif (!ytResponse.id)\n  throw new Error('YouTube upload failed: ' + stdout.slice(-500));\n\nconsole.log('YT upload OK â€” video ID: ' + ytResponse.id);\n\nreturn [{ json: {\n  ...data,\n  yt_video_id:  ytResponse.id,\n  yt_video_url: 'https://www.youtube.com/shorts/' + ytResponse.id,\n  yt_status:    'SUCCESS'\n}}];"
-      },
-      "id": "s3-n05_yt",
-      "name": "YT: Upload Short",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1360,
-        270
-      ]
-    }
-  ],
-  "connections": {
-    "Stage 3 Webhook": {
-      "main": [
-        [
-          {
-            "node": "Extract S3 Payload",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Manual Test Trigger": {
-      "main": [
-        [
-          {
-            "node": "Test Payload",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Test Payload": {
-      "main": [
-        [
-          {
-            "node": "Build Caption Prompt",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Extract S3 Payload": {
-      "main": [
-        [
-          {
-            "node": "Build Caption Prompt",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Build Caption Prompt": {
-      "main": [
-        [
-          {
-            "node": "Gemini Social Captions",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Gemini Social Captions": {
-      "main": [
-        [
-          {
-            "node": "Parse Gemini Captions",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Parse Gemini Captions": {
-      "main": [
-        [
-          {
-            "node": "FB: Upload Video",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "LI: Make Webhook",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "YT: Upload Short",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "FB: Upload Video": {
-      "main": [
-        [
-          {
-            "node": "Parse FB Response",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Parse FB Response": {
-      "main": [
-        [
-          {
-            "node": "Merge Results",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "LI: Make Webhook": {
-      "main": [
-        [
-          {
-            "node": "LI: Finalize",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "LI: Finalize": {
-      "main": [
-        [
-          {
-            "node": "Merge Results",
-            "type": "main",
-            "index": 1
-          }
-        ]
-      ]
-    },
-    "Merge Results": {
-      "main": [
-        [
-          {
-            "node": "Build Social Summary",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Build Social Summary": {
-      "main": [
-        [
-          {
-            "node": "Update Sheet with URLs",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Update Sheet with URLs": {
-      "main": [
-        [
-          {
-            "node": "Send Stage 3 Callback",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "YT: Upload Short": {
-      "main": [
-        [
-          {
-            "node": "Merge Results",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    }
-  },
-  "active": true,
-  "settings": {
-    "executionOrder": "v1",
-    "saveManualExecutions": true
-  },
-  "id": "physics-stage3-pipeline",
-  "tags": [
-    {
-      "name": "physics-channel"
-    },
-    {
-      "name": "stage3"
-    }
-  ]
+    ]
 }

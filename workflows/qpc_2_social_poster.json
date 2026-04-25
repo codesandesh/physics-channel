@@ -1,0 +1,207 @@
+{
+  "name": "QPC 2 - Social Media Poster",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "qpc-social-post",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "s1", "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1, "position": [-200, -100],
+      "webhookId": "qpc-social-post"
+    },
+
+    {
+      "parameters": {},
+      "id": "manual-test-trigger", "name": "Manual Test Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1, "position": [-200, 100]
+    },
+
+    {
+      "parameters": {
+        "jsCode": "return [{\n  \"fileName\": \"schrodingers_cat_2026-04-22_1776860768634.png\",\n  \"rowIndex\": 3,\n  \"sheetRowId\": \"QPC-002\",\n  \"headline\": \"In the quantum realm, electrons can 'see' a magnetic field even where the field itself is zero. This phenomenon, known as the Aharonov-Bohm effect, proves that potentials, not just forces, shape physical reality.\",\n  \"facebook_caption\": \"In the quantum realm reality does not follow the rules we experience in everyday life. Particles such as electrons behave both like waves and like discrete objects depending on how they are observed. This dual nature challenges classical ideas and opens a window into a deeper structure of the universe where probability and uncertainty replace certainty and predictability.\\n\\nOne of the most fascinating discoveries in quantum physics is the Aharonov Bohm effect. It shows that electrons can be influenced by a magnetic field even when they travel through regions where the magnetic field strength is zero. Instead of interacting with the field directly the electrons respond to the underlying electromagnetic potentials revealing that these potentials carry real physical meaning.\\n\\nThis insight reshaped our understanding of space and interaction. It suggests that the quantum world is not limited to direct contact or local forces but is influenced by a broader framework where fields and potentials extend their effects across space. Experiments observing interference patterns confirmed that even subtle changes in potential can shift the behavior of particles in measurable ways.\\n\\nThe implications go far beyond a single experiment. The Aharonov Bohm effect highlights the non local nature of quantum mechanics and encourages scientists to rethink how information and influence propagate through the universe. It also plays a role in modern technologies and theoretical research pushing the boundaries of how we understand reality at its most fundamental level.\\n\\n#QuantumPhysics #AharonovBohm #QuantumMechanics #NonLocality #ElectronBehavior #PhysicsResearch #ScienceInnovation #WaveParticleDuality #QuantumTheory #ModernPhysics\",\n  \"linkedin_caption\": \"Quantum mechanics continues to challenge our most fundamental assumptions about how the physical world operates. At the quantum scale particles do not behave like objects in classical physics and the forces that govern them operate through mechanisms that have no equivalent in everyday experience. Understanding these mechanisms is essential for anyone working at the frontier of modern science and technology.\\n\\nThe Aharonov Bohm effect stands as one of the most profound demonstrations of this quantum reality. It established that electrons are sensitive to electromagnetic potentials even in regions where the magnetic field itself is entirely absent. This was not a theoretical curiosity but an experimentally verified phenomenon that forced a fundamental revision of how physicists think about fields and their role in physical interactions.\\n\\nFrom a research perspective this effect reveals that the mathematical quantities we once considered mere tools for calculation actually carry direct physical significance. The vector potential is not simply a convenient abstraction but a real influence that shapes quantum phase and therefore shapes the behavior of particles at the most fundamental level.\\n\\nFor professionals in physics, engineering, and quantum computing this has lasting implications. It informs the design of electron interferometers, contributes to our understanding of topological effects in condensed matter systems, and deepens the theoretical foundation on which quantum technologies are being built. The Aharonov Bohm effect reminds us that in science the most unexpected findings often lead to the most transformative advances.\\n\\n#QuantumPhysics #AharonovBohm #QuantumMechanics #ElectromagneticTheory #QuantumComputing #PhysicsResearch #ScienceLeadership #CondensedMatter #QuantumTechnology #ModernPhysics\",\n  \"drive_file_id\": \"1kl6HYCWfof4326pRA3osxvwtn95hfcpQ\",\n  \"drive_url\": \"https://drive.usercontent.google.com/download?id=1kl6HYCWfof4326pRA3osxvwtn95hfcpQ&export=download&confirm=t\"\n}];"
+      },
+      "id": "test-payload", "name": "Test Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2, "position": [20, 100]
+    },
+
+    {
+      "parameters": {
+        "jsCode": "const b = $input.item.json.body || $input.item.json;\nconst fileId = b.drive_file_id || '';\nconst driveUrl = fileId\n  ? `https://drive.usercontent.google.com/download?id=${fileId}&export=download&confirm=t`\n  : (b.drive_url || '');\nreturn [{ json: {\n  headline:          b.headline          || '',\n  facebook_caption:  b.facebook_caption  || b.headline || '',\n  linkedin_caption:  b.linkedin_caption  || b.headline || '',\n  instagram_caption: b.instagram_caption || b.facebook_caption || b.headline || '',\n  tiktok_caption:    b.tiktok_caption    || b.headline || '',\n  drive_file_id:     fileId,\n  drive_url:         driveUrl\n} }];"
+      },
+      "id": "s2", "name": "Parse Webhook Body",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2, "position": [240, 0]
+    },
+
+    {
+      "parameters": {
+        "jsCode": "const data = $input.item.json;\n\nfunction clean(text) {\n  if (!text) return '';\n  let res = text.replace(/[\\u{1F600}-\\u{1F64F}\\u{1F300}-\\u{1F5FF}\\u{1F680}-\\u{1F6FF}\\u{1F1E6}-\\u{1F1FF}\\u{2600}-\\u{26FF}\\u{2700}-\\u{27BF}]/gu, '');\n  res = res.replace(/[\\/\\\"*^%$@!\\-_~]/g, '');\n  return res.replace(/\\s+/g, ' ').trim();\n}\n\nreturn [{ json: {\n  ...data,\n  facebook_caption:  clean(data.facebook_caption),\n  linkedin_caption:  clean(data.linkedin_caption),\n  instagram_caption: clean(data.instagram_caption),\n  tiktok_caption:    clean(data.tiktok_caption)\n}}];"
+      },
+      "id": "clean-captions", "name": "Clean Captions",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2, "position": [460, 0]
+    },
+
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": { "__rl": true, "value": "={{ $json.drive_file_id }}", "mode": "id" },
+        "options": {}
+      },
+      "id": "s3", "name": "Download Image from Drive",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3, "position": [680, 0],
+      "credentials": {
+        "googleDriveOAuth2Api": { "id": "QUGEpurbhr31d8QZ", "name": "Google Drive account 3" }
+      }
+    },
+
+    {
+      "parameters": {
+        "jsCode": "const binaryData = await this.helpers.getBinaryDataBuffer(0, 'data');\nconst binary = await this.helpers.prepareBinaryData(binaryData, 'physics_post.png', 'image/png');\nreturn [{\n  json: {\n    facebook_caption: $('Clean Captions').item.json.facebook_caption,\n    linkedin_caption: $('Clean Captions').item.json.linkedin_caption\n  },\n  binary: { data: binary }\n}];"
+      },
+      "id": "s4", "name": "Prepare Image Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2, "position": [900, 0]
+    },
+
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://graph.facebook.com/v20.0/' + $env.FB_PAGE_ID + '/photos' }}",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": { "parameters": [
+          { "parameterType": "formBinaryData", "name": "source",       "inputDataFieldName": "data" },
+          { "parameterType": "formData",       "name": "caption",      "value": "={{ $json.facebook_caption }}" },
+          { "parameterType": "formData",       "name": "access_token", "value": "={{ $env.FB_PAGE_ACCESS_TOKEN }}" }
+        ]},
+        "options": {}
+      },
+      "id": "s5", "name": "Post to Facebook",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1, "position": [1120, -100],
+      "continueOnFail": true
+    },
+
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.linkedin.com/v2/assets?action=registerUpload",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [
+          { "name": "Authorization",               "value": "={{ 'Bearer ' + $env.LINKEDIN_ACCESS_TOKEN }}" },
+          { "name": "Content-Type",                "value": "application/json" },
+          { "name": "X-Restli-Protocol-Version",   "value": "2.0.0" }
+        ]},
+        "sendBody": true, "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ registerUploadRequest: { recipes: ['urn:li:digitalmediaRecipe:feedshare-image'], owner: `urn:li:organization:${$env.LINKEDIN_ORGANIZATION_ID}`, serviceRelationships: [{ relationshipType: 'OWNER', identifier: 'urn:li:userGeneratedContent' }] } }) }}",
+        "options": {}
+      },
+      "id": "s6", "name": "LinkedIn Register Upload",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1, "position": [1120, 100],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const res = $input.item.json;\nconst uploadUrl = res?.value?.uploadMechanism?.['com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest']?.uploadUrl || '';\nconst asset = res?.value?.asset || '';\nreturn [{ json: {\n  linkedin_caption: $('Prepare Image Data').item.json.linkedin_caption,\n  li_upload_url: uploadUrl,\n  li_asset: asset\n}, binary: $('Prepare Image Data').item.binary }];"
+      },
+      "id": "s7", "name": "Parse LinkedIn Upload URL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2, "position": [1340, 100]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ $json.li_upload_url }}",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [
+          { "name": "Authorization", "value": "={{ 'Bearer ' + $env.LINKEDIN_ACCESS_TOKEN }}" }
+        ]},
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data",
+        "options": {}
+      },
+      "id": "s8", "name": "LinkedIn Upload Image",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1, "position": [1560, 100],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.linkedin.com/v2/ugcPosts",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [
+          { "name": "Authorization",               "value": "={{ 'Bearer ' + $env.LINKEDIN_ACCESS_TOKEN }}" },
+          { "name": "Content-Type",                "value": "application/json" },
+          { "name": "X-Restli-Protocol-Version",   "value": "2.0.0" }
+        ]},
+        "sendBody": true, "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ author: `urn:li:organization:${$env.LINKEDIN_ORGANIZATION_ID}`, lifecycleState: 'PUBLISHED', specificContent: { 'com.linkedin.ugc.ShareContent': { shareCommentary: { text: $('Prepare Image Data').item.json.linkedin_caption }, shareMediaCategory: 'IMAGE', media: [{ status: 'READY', description: { text: 'Schrödinger\\'s Cat — Quantum Physics Facts' }, media: $('Parse LinkedIn Upload URL').item.json.li_asset, title: { text: 'Schrödinger\\'s Cat' } }] } }, visibility: { 'com.linkedin.ugc.MemberNetworkVisibility': 'PUBLIC' } }) }}",
+        "options": {}
+      },
+      "id": "s9", "name": "Post to LinkedIn",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1, "position": [1780, 100],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://hook.eu1.make.com/cb6c71oflfuhk9k1y46jvuxvcuikswnm",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [
+          { "name": "Content-Type", "value": "application/json" }
+        ]},
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ post_type: 'image', media_url: $json.drive_url, linkedin_caption: $json.linkedin_caption, instagram_caption: $json.instagram_caption, tiktok_caption: $json.tiktok_caption }) }}",
+        "options": { "timeout": 60000 }
+      },
+      "id": "make-multi-post", "name": "Make: Multi-Platform Post",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4, "position": [680, 200],
+      "continueOnFail": true
+    },
+
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"status\": \"posted\", \"platforms\": [\"facebook\", \"linkedin\", \"instagram\", \"tiktok\"] }"
+      },
+      "id": "s10", "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1, "position": [2000, 0]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger":           { "main": [[{ "node": "Parse Webhook Body",        "type": "main", "index": 0 }]] },
+    "Manual Test Trigger":       { "main": [[{ "node": "Test Payload",               "type": "main", "index": 0 }]] },
+    "Test Payload":              { "main": [[{ "node": "Parse Webhook Body",        "type": "main", "index": 0 }]] },
+    "Parse Webhook Body":        { "main": [[{ "node": "Clean Captions",            "type": "main", "index": 0 }]] },
+    "Clean Captions":            { "main": [[{ "node": "Download Image from Drive",  "type": "main", "index": 0 }, { "node": "Make: Multi-Platform Post", "type": "main", "index": 0 }]] },
+    "Download Image from Drive": { "main": [[{ "node": "Prepare Image Data",         "type": "main", "index": 0 }]] },
+    "Prepare Image Data": { "main": [[
+      { "node": "Post to Facebook",         "type": "main", "index": 0 },
+      { "node": "LinkedIn Register Upload", "type": "main", "index": 0 }
+    ]]},
+    "LinkedIn Register Upload":  { "main": [[{ "node": "Parse LinkedIn Upload URL",  "type": "main", "index": 0 }]] },
+    "Parse LinkedIn Upload URL": { "main": [[{ "node": "LinkedIn Upload Image",       "type": "main", "index": 0 }]] },
+    "LinkedIn Upload Image":     { "main": [[{ "node": "Post to LinkedIn",            "type": "main", "index": 0 }]] },
+    "Post to LinkedIn":          { "main": [[{ "node": "Respond to Webhook",          "type": "main", "index": 0 }]] },
+    "Post to Facebook":          { "main": [[{ "node": "Respond to Webhook",          "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "meta": { "templateCredsSetupCompleted": false },
+  "id": "qpc-social-poster"
+}

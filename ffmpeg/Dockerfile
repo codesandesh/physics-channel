@@ -23,6 +23,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # Python 3 for any lightweight helper scripts
     python3 \
     python3-pip \
+    # Fonts for FFmpeg subtitle/ASS rendering (libass needs these)
+    fonts-liberation \
+    fonts-dejavu-core \
+    fontconfig \
+  && fc-cache -fv \
   && apt-get clean \
   && rm -rf /var/lib/apt/lists/*
 

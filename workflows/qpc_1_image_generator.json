@@ -1,0 +1,389 @@
+{
+  "name": "QPC 1 - Physics Image Generator",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 4
+            }
+          ]
+        }
+      },
+      "id": "nS0", "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1, "position": [-200, -100]
+    },
+
+    {
+      "parameters": {
+        "jsCode": "return [{\n  \"rowIndex\": 3,\n  \"sheetRowId\": \"QPC-002\",\n  \"headline\": \"In the quantum realm, electrons can 'see' a magnetic field even where the field itself is zero. This phenomenon, known as the Aharonov-Bohm effect, proves that potentials, not just forces, shape physical reality.\",\n  \"topic\": \"Aharonov-Bohm\",\n  \"highlights\": [\"quantum\", \"Aharonov-Bohm\", \"potentials\", \"reality\"],\n  \"bg_image_url\": \"https://d1q70pf5vjeyhc.cloudfront.net/predictions/16d9857c2859415f997d85df0c81502c/1.jpeg\",\n  \"facebook_caption\": \"In the quantum realm, reality behaves in ways that challenge our standard intuition. The Aharonov Bohm effect demonstrates that electrons can detect a magnetic field even if they never physically enter the region where that field exists. This discovery shifted our understanding of physics by proving that electromagnetic potentials are more than just mathematical tools. They are physical realities that can influence particles from a distance. By observing these subtle shifts in electron paths, scientists have confirmed the non local nature of the quantum world.\",\n  \"linkedin_caption\": \"The Aharonov Bohm effect represents a fundamental milestone in quantum mechanics and electromagnetic theory. It illustrates that charged particles are sensitive to the magnetic vector potential even in regions where the magnetic field strength is zero. For professionals in research and technology, this underscores the profound importance of quantum phase shifts in designing precise instrumentation. This phenomenon confirms that the physical state of a system can be altered by potentials that exert no direct classical force. Understanding these mechanisms is essential for the future of quantum computing and advanced electron interferometry.\"\n}];"
+      },
+      "id": "test-payload", "name": "Test Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2, "position": [-110, 310]
+    },
+
+    {
+      "parameters": {
+        "url": "={{ $json.bg_image_url }}",
+        "options": { "response": { "response": { "responseFormat": "file" } } }
+      },
+      "id": "test-bg", "name": "Download Test BG",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1, "position": [220, 200]
+    },
+
+    {
+      "parameters": {},
+      "id": "manual-trigger", "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1, "position": [-200, 100]
+    },
+
+    {
+      "parameters": {},
+      "id": "manual-test-trigger", "name": "Manual Test Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1, "position": [-200, 300]
+    },
+
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://sheets.googleapis.com/v4/spreadsheets/1ns6J4yI4avUFvYZS1Tu97DQpy2z7t22PbA2tvUO824g/values/Image Post Queue!A2:M1000",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleDriveOAuth2Api",
+        "options": {}
+      },
+      "id": "nS1", "name": "Read Sheet Rows",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1, "position": [220, 0],
+      "credentials": {
+        "googleDriveOAuth2Api": { "id": "QUGEpurbhr31d8QZ", "name": "Google Drive account 3" }
+      }
+    },
+
+    {
+      "parameters": {
+        "jsCode": "const rows = $input.item.json?.values || [];\n// Columns: 0=ID, 1=Topic, 2=CustomHeadline, 3=Status\nconst pending = rows\n  .map((r, i) => ({ rowIndex: i + 2, id: r[0]||'', topic: r[1]||'', customHeadline: r[2]||'', status: (r[3]||'').toUpperCase().trim() }))\n  .filter(r => r.status === 'PENDING' && r.topic);\nif (pending.length === 0) {\n  throw new Error('NO_PENDING_TOPICS: No PENDING topics found in Image Post Queue.');\n}\nconst first = pending[0];\nreturn [{ json: { rowIndex: first.rowIndex, sheetRowId: first.id, topic: first.topic, customHeadline: first.customHeadline } }];"
+      },
+      "id": "nS2", "name": "Find First Pending Topic",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2, "position": [440, 0]
+    },
+
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ `https://sheets.googleapis.com/v4/spreadsheets/1ns6J4yI4avUFvYZS1Tu97DQpy2z7t22PbA2tvUO824g/values/Image Post Queue!D${$json.rowIndex}?valueInputOption=RAW` }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleDriveOAuth2Api",
+        "sendBody": true, "specifyBody": "json",
+        "jsonBody": "={ \"values\": [[\"PROCESSING\"]] }",
+        "options": {}
+      },
+      "id": "nS3", "name": "Mark PROCESSING",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1, "position": [660, 0],
+      "credentials": {
+        "googleDriveOAuth2Api": { "id": "QUGEpurbhr31d8QZ", "name": "Google Drive account 3" }
+      }
+    },
+
+    {
+      "parameters": {
+        "jsCode": "const factData = $('Find First Pending Topic').item.json;\nconst topic = factData.customHeadline || factData.topic;\nconst prompt = `Generate one mind-blowing lesser-known quantum physics or particle physics fact about this topic: \"${topic}\"\\n\\nReturn ONLY valid JSON (no markdown):\\n{\\n  \"headline\": \"A mind-blowing fact between 30 and 34 words long. Use 2-3 engaging, authoritative sentences.\",\\n  \"topic\": \"one-word physics concept\",\\n  \"highlights\": [\"List 3-5 central physics concepts or technical terms to highlight. Focus ONLY on the scientific core (e.g. Entanglement, Quarks, Superposition). NEVER highlight common verbs or generic words like 'see', 'zero', 'find', 'make', or 'keep'.\"],\\n  \"image_search_query\": \"specific visual search query for a real photo\"\\n}`;\nreturn [{ json: {\n  gemini_payload: {\n    contents: [{ parts: [{ text: prompt }] }],\n    generationConfig: { maxOutputTokens: 1000, temperature: 0.85, responseMimeType: \"application/json\" }\n  }\n} }];"
+      },
+      "id": "prep-fact", "name": "Prep Fact Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2, "position": [770, -100]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=' + $env.GOOGLE_AI_API_KEY }}",
+        "sendBody": true, "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.gemini_payload) }}",
+        "options": {}
+      },
+      "id": "n8", "name": "Generate Physics Fact",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1, "position": [990, -100]
+    },
+    {
+      "parameters": {
+        "jsCode": "const res = JSON.parse($input.item.json.candidates[0].content.parts[0].text);\nreturn [{ json: { ...($('Mark PROCESSING').item.json), ...res } }];"
+      },
+      "id": "n9-parse", "name": "Parse Fact",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2, "position": [1210, -100]
+    },
+
+    {
+      "parameters": {
+        "jsCode": "const fact = $input.item.json;\nconst prompt = `Describe a stunning, cinematic background image for this physics concept: \"${fact.headline}\"\\n\\nVisual style: Cinematic, high-detail, realistic textures, dark background with vibrant energy trails, 3D render feel.\\n\\nReturn ONLY JSON:\\n{\\n  \"visual_prompt\": \"Detailed description of the image...\"\\n}`;\nreturn [{ json: {\n  gemini_payload: {\n    contents: [{ parts: [{ text: prompt }] }],\n    generationConfig: { maxOutputTokens: 500, temperature: 0.9, responseMimeType: \"application/json\" }\n  }\n} }];"
+      },
+      "id": "prep-visual", "name": "Prep Visual Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2, "position": [1320, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=' + $env.GOOGLE_AI_API_KEY }}",
+        "sendBody": true, "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.gemini_payload) }}",
+        "options": {}
+      },
+      "id": "n10-gemini", "name": "Build Visual Prompt",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1, "position": [1540, 0]
+    },
+
+    {
+      "parameters": {
+        "jsCode": "const res = JSON.parse($input.item.json.candidates[0].content.parts[0].text);\nreturn [{ json: {\n  prompt: res.visual_prompt,\n  aspect_ratio: \"4:5\",\n  negative_prompt: \"text, logo, watermark, blurry, low quality, distorted, cartoon\"\n} }];"
+      },
+      "id": "prep-ws", "name": "Prep Wavespeed Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2, "position": [1650, 100]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.wavespeed.ai/v1/images/generations",
+        "authentication": "genericCredentialType",
+        "genericCredentialType": "httpHeaderAuth",
+        "sendBody": true, "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "n11-ws", "name": "Generate Background Image",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1, "position": [1870, 100],
+      "credentials": {
+        "httpHeaderAuth": { "id": "H2IPlWXXNEhmdgzj", "name": "Wavespeed API Key" }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const url = $input.item.json.data[0].url;\nreturn [{ json: { ...($('Parse Fact').item.json), bg_image_url: url } }];"
+      },
+      "id": "n12-url", "name": "Extract Image URL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2, "position": [2090, 100]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.bg_image_url }}",
+        "options": { "response": { "response": { "responseFormat": "file" } } }
+      },
+      "id": "n12", "name": "Download Background",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1, "position": [2310, 100]
+    },
+
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.tavily.com/search",
+        "sendBody": true, "specifyBody": "json",
+        "jsonBody": "={ \"api_key\": \"{{$env.TAVILY_API_KEY}}\", \"query\": \"{{$json.image_search_query}}\", \"search_depth\": \"basic\", \"include_images\": true }",
+        "options": {}
+      },
+      "id": "n9", "name": "Tavily Reference Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1, "position": [2420, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "const res = $input.item.json;\nconst images = res?.images || [];\nconst url = images.find(u => /\\.(jpg|jpeg|png)/i.test(u)) || images[0] || '';\nreturn [{ json: { ...($('Extract Image URL').item.json), ref_image_url: url } }];"
+      },
+      "id": "n10", "name": "Extract Reference URL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2, "position": [2640, 0]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.ref_image_url }}",
+        "options": { "response": { "response": { "responseFormat": "file" } } }
+      },
+      "id": "n11", "name": "Download Reference Photo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1, "position": [2860, 0],
+      "continueOnFail": true
+    },
+
+    {
+      "parameters": {
+        "jsCode": "const fact = $('Extract Image URL').item.json;\nconst prompt = `You are a science content writer for a quantum physics social media channel. Write four platform-specific captions about this fact: \"${fact.headline}\"\\n\\nSTYLE GUIDE — study this example structure carefully:\\nParagraph 1: Set the scene with a broad statement about quantum physics or the universe that draws the reader in. 3 to 4 sentences.\\nParagraph 2: Introduce the specific phenomenon or discovery. Explain what it is and what makes it unusual. 3 to 4 sentences.\\nParagraph 3: Explain the deeper meaning or mechanism behind it. What does it reveal about nature or reality. 3 to 4 sentences.\\nParagraph 4: State the wider implications — for science, technology, or our understanding of the universe. End on a powerful thought. 3 to 4 sentences.\\nHashtags: End with 8 to 10 relevant hashtags on a new line. Mix broad and specific tags. Example: #QuantumPhysics #Science #Physics #QuantumMechanics\\n\\nSTRICT RULES:\\n- Write in simple, clear, flowing English. No complex jargon.\\n- Each sentence must be complete and easy to read aloud.\\n- NO emojis, NO markdown, NO bold, NO italics.\\n- NO special characters except # in hashtags. No slashes, quotes, asterisks, percent, dollar, at signs, exclamation, dashes, underscores.\\n- All four captions must be completely different in wording, angle, and paragraph structure.\\n- Every caption follows the SAME structure: exactly 5 content paragraphs totalling 250 words, then a 6th paragraph of 10-15 hashtags only. No hashtags inside paragraphs 1-5.\\n\\nPARAGRAPH STRUCTURE (same for all platforms, tone varies):\\n- Paragraph 1: Hook — 1-2 striking sentences that stop the scroll.\\n- Paragraph 2: Explain the core phenomenon clearly and simply. 3-4 sentences.\\n- Paragraph 3: Go deeper — mechanism, discovery, or surprising implication. 3-4 sentences.\\n- Paragraph 4: Real-world significance or broader scientific meaning. 3-4 sentences.\\n- Paragraph 5: Close with a powerful statement or engaging question. 1-2 sentences.\\n- Paragraph 6 (hashtags only): 10-15 relevant hashtags separated by spaces.\\n\\nTONE PER PLATFORM (structure is identical, only voice changes):\\n- FACEBOOK: conversational, wonder-driven, story-like. Hook with something surprising.\\n- LINKEDIN: professional, authoritative, research-focused. Emphasize scientific significance.\\n- INSTAGRAM: visual, punchy, exciting. Paragraph 5 must end with a question to drive comments.\\n- TIKTOK: casual, energetic, like talking to a curious friend. Short punchy sentences throughout.\\n\\nReturn ONLY valid JSON:\\n{\\n  \"facebook_caption\": \"...\",\\n  \"linkedin_caption\": \"...\",\\n  \"instagram_caption\": \"...\",\\n  \"tiktok_caption\": \"...\"\\n}`;\nreturn [{ json: {\n  gemini_payload: {\n    contents: [{ parts: [{ text: prompt }] }],\n    generationConfig: { maxOutputTokens: 8192, temperature: 0.75, responseMimeType: \"application/json\" }\n  }\n} }];"
+      },
+      "id": "prep-captions", "name": "Prep Captions Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2, "position": [2970, -100]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=' + $env.GOOGLE_AI_API_KEY }}",
+        "sendBody": true, "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.gemini_payload) }}",
+        "options": {}
+      },
+      "id": "n12-captions", "name": "Generate Captions",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1, "position": [3190, -100]
+    },
+    {
+      "parameters": {
+        "jsCode": "const res = JSON.parse($input.item.json.candidates[0].content.parts[0].text);\nreturn [{ json: { ...($('Extract Image URL').item.json), ...res } }];"
+      },
+      "id": "n13", "name": "Parse Captions",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2, "position": [3300, 0]
+    },
+
+    {
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst jobId = Date.now();\nconst bgN8n  = `/data/manim/scripts/qpc_bg_${jobId}.jpg`;\nconst refN8n = `/data/manim/scripts/qpc_ref_${jobId}.jpg`;\nconst outN8n = `/data/manim/renders/qpc_out_${jobId}.png`;\nconst bgMnm  = bgN8n.replace('/data/manim/scripts/','/manim/scripts/');\nconst refMnm = refN8n.replace('/data/manim/scripts/','/manim/scripts/');\nconst outMnm = outN8n.replace('/data/manim/renders/','/manim/renders/');\n\nconst bgBuf = await this.helpers.getBinaryDataBuffer(0, 'data');\nfs.writeFileSync(bgN8n, bgBuf);\n\nlet hasRef = false;\ntry {\n  const refNode = $('Download Reference Photo').item;\n  if (refNode?.binary?.data) {\n    const rb = await this.helpers.getBinaryDataBuffer(0, 'data', refNode);\n    if (rb && rb.length > 1000) { fs.writeFileSync(refN8n, rb); hasRef = true; }\n  }\n} catch(e) {}\n\nconst factData = $input.item.json;\nconst config = JSON.stringify({\n  bg_path:     bgMnm,\n  ref_path:    hasRef ? refMnm : '',\n  output_path: outMnm,\n  headline:    factData.headline,\n  highlights:  factData.highlights || []\n});\nreturn [{ json: {\n  config, jobId, outN8n,\n  rowIndex:          factData.rowIndex,\n  sheetRowId:        factData.sheetRowId,\n  headline:          factData.headline,\n  facebook_caption:  factData.facebook_caption,\n  linkedin_caption:  factData.linkedin_caption,\n  instagram_caption: factData.instagram_caption,\n  tiktok_caption:    factData.tiktok_caption\n} }];"
+      },
+      "id": "n14", "name": "Write Images to Volume",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2, "position": [3520, 0]
+    },
+
+    {
+      "parameters": {
+        "jsCode": "const { execSync } = require('child_process');\nconst config = $input.item.json.config;\nconst escapedConfig = config.replace(/\"/g, '\\\\\"');\nconst cmd = `docker exec qpc_manim_runner bash -c \"python3 /manim/scripts/composite_physics_post.py '${escapedConfig}'\"`;\ntry {\n  const stdout = execSync(cmd, { encoding: 'utf-8', timeout: 300000 });\n  return { json: { ...$input.item.json, compositor_stdout: stdout.toString() } };\n} catch (e) {\n  throw new Error('Compositor failed: ' + (e.stdout || e.message));\n}"
+      },
+      "id": "n15", "name": "Run Compositor",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2, "position": [3740, 0]
+    },
+
+    {
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst outPath = $('Write Images to Volume').item.json.outN8n;\nif (!fs.existsSync(outPath)) throw new Error('Output not found: ' + outPath);\nconst buf = fs.readFileSync(outPath);\nconst binary = await this.helpers.prepareBinaryData(buf, 'physics_post.png', 'image/png');\nconst d = $('Write Images to Volume').item.json;\nconst now = new Date().toISOString().slice(0,10);\nreturn [{ json: {\n  fileName:          `schrodingers_cat_${now}_${d.jobId}.png`,\n  rowIndex:          d.rowIndex,\n  sheetRowId:        d.sheetRowId,\n  headline:          d.headline,\n  facebook_caption:  d.facebook_caption,\n  linkedin_caption:  d.linkedin_caption,\n  instagram_caption: d.instagram_caption,\n  tiktok_caption:    d.tiktok_caption\n}, binary: { data: binary } }];"
+      },
+      "id": "n16", "name": "Read Output Image",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2, "position": [3960, 0]
+    },
+
+    {
+      "parameters": {
+        "operation": "upload",
+        "name": "={{ $json.fileName }}",
+        "folderId": { "__rl": true, "value": "={{ $env.GOOGLE_DRIVE_FOLDER_ID }}", "mode": "id" },
+        "inputDataFieldName": "data",
+        "options": {}
+      },
+      "id": "n17", "name": "Upload to Google Drive",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3, "position": [4180, 0],
+      "credentials": {
+        "googleDriveOAuth2Api": { "id": "QUGEpurbhr31d8QZ", "name": "Google Drive account 3" }
+      }
+    },
+
+    {
+      "parameters": {
+        "jsCode": "const drive = $input.item.json;\nconst prev  = $('Read Output Image').item.json;\nreturn [{ json: {\n  ...prev,\n  drive_file_id: drive.id,\n  drive_url:     `https://drive.usercontent.google.com/download?id=${drive.id}&export=download&confirm=t`\n} }];"
+      },
+      "id": "merge-drive-data", "name": "Merge Drive & Captions",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2, "position": [4400, 0]
+    },
+
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SERVER_BASE_URL }}/webhook/qpc-social-post",
+        "sendBody": true, "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "n18", "name": "Trigger Social Poster",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1, "position": [4620, 0]
+    },
+
+    {
+      "parameters": {
+        "jsCode": "const res = $input.item.json;\nconst fb_post_id  = res?.fb_post_id  || '';\nconst li_post_id  = res?.li_post_id  || '';\nconst driveFileId = res?.drive_file_id || '';\nconst driveUrl    = res?.drive_url    || '';\nconst headline    = $('Read Output Image').item.json.headline;\nconst rowIndex    = $('Read Output Image').item.json.rowIndex;\nconst now = new Date().toISOString();\nreturn [{ json: { rowIndex, fb_post_id, li_post_id, driveFileId, driveUrl, headline, publishedAt: now } }];"
+      },
+      "id": "nS4", "name": "Collect Post IDs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2, "position": [4840, 0]
+    },
+
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ `https://sheets.googleapis.com/v4/spreadsheets/1ns6J4yI4avUFvYZS1Tu97DQpy2z7t22PbA2tvUO824g/values/Image Post Queue!D${$json.rowIndex}:L${$json.rowIndex}?valueInputOption=RAW` }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleDriveOAuth2Api",
+        "sendBody": true, "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ values: [[\n  'PUBLISHED',\n  '',\n  $json.headline,\n  $json.driveFileId,\n  $json.driveUrl,\n  $json.fb_post_id,\n  $json.li_post_id,\n  '',\n  $json.publishedAt\n]] }) }}",
+        "options": {}
+      },
+      "id": "nS5", "name": "Mark PUBLISHED",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1, "position": [5060, 0],
+      "credentials": {
+        "googleDriveOAuth2Api": { "id": "QUGEpurbhr31d8QZ", "name": "Google Drive account 3" }
+      }
+    },
+
+    {
+      "parameters": {
+        "jsCode": "const d = $('Read Output Image').item.json;\nconst drive = $('Upload to Google Drive').item.json;\nreturn [{ json: {\n  headline:          d.headline,\n  facebook_caption:  d.facebook_caption,\n  linkedin_caption:  d.linkedin_caption,\n  instagram_caption: d.instagram_caption,\n  tiktok_caption:    d.tiktok_caption,\n  drive_file_id:     drive.id,\n  drive_url:        `https://drive.usercontent.google.com/download?id=${drive.id}&export=download&confirm=t`,\n  rowIndex:         d.rowIndex\n} }];"
+      },
+      "id": "stage2-payload", "name": "Generate Stage 2 Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2, "position": [5280, 0]
+    }
+  ],
+
+  "connections": {
+    "Schedule Trigger":         { "main": [[{ "node": "Read Sheet Rows",            "type": "main", "index": 0 }]] },
+    "Manual Trigger":           { "main": [[{ "node": "Read Sheet Rows",            "type": "main", "index": 0 }]] },
+    "Manual Test Trigger":      { "main": [[{ "node": "Test Payload",               "type": "main", "index": 0 }]] },
+    "Test Payload":             { "main": [[{ "node": "Download Test BG",           "type": "main", "index": 0 }]] },
+    "Download Test BG":         { "main": [[{ "node": "Write Images to Volume",     "type": "main", "index": 0 }]] },
+    "Read Sheet Rows":          { "main": [[{ "node": "Find First Pending Topic",   "type": "main", "index": 0 }]] },
+    "Find First Pending Topic": { "main": [[{ "node": "Mark PROCESSING",            "type": "main", "index": 0 }]] },
+    "Mark PROCESSING":          { "main": [[{ "node": "Prep Fact Payload",         "type": "main", "index": 0 }]] },
+    "Prep Fact Payload":        { "main": [[{ "node": "Generate Physics Fact",      "type": "main", "index": 0 }]] },
+    "Generate Physics Fact":    { "main": [[{ "node": "Parse Fact",                 "type": "main", "index": 0 }]] },
+    "Parse Fact":               { "main": [[{ "node": "Prep Visual Payload",       "type": "main", "index": 0 }]] },
+    "Prep Visual Payload":      { "main": [[{ "node": "Build Visual Prompt",        "type": "main", "index": 0 }]] },
+    "Build Visual Prompt":      { "main": [[{ "node": "Prep Wavespeed Payload",     "type": "main", "index": 0 }]] },
+    "Prep Wavespeed Payload":   { "main": [[{ "node": "Generate Background Image",  "type": "main", "index": 0 }]] },
+    "Generate Background Image":{ "main": [[{ "node": "Extract Image URL",          "type": "main", "index": 0 }]] },
+    "Extract Image URL":        { "main": [[{ "node": "Download Background",        "type": "main", "index": 0 }]] },
+    "Download Background":      { "main": [[{ "node": "Tavily Reference Search",    "type": "main", "index": 0 }]] },
+    "Tavily Reference Search":  { "main": [[{ "node": "Extract Reference URL",      "type": "main", "index": 0 }]] },
+    "Extract Reference URL":    { "main": [[{ "node": "Download Reference Photo",   "type": "main", "index": 0 }]] },
+    "Download Reference Photo": { "main": [[{ "node": "Prep Captions Payload",     "type": "main", "index": 0 }]] },
+    "Prep Captions Payload":    { "main": [[{ "node": "Generate Captions",          "type": "main", "index": 0 }]] },
+    "Generate Captions":        { "main": [[{ "node": "Parse Captions",             "type": "main", "index": 0 }]] },
+    "Parse Captions":           { "main": [[{ "node": "Write Images to Volume",     "type": "main", "index": 0 }]] },
+    "Write Images to Volume":   { "main": [[{ "node": "Run Compositor",             "type": "main", "index": 0 }]] },
+    "Run Compositor":           { "main": [[{ "node": "Read Output Image",          "type": "main", "index": 0 }]] },
+    "Read Output Image":        { "main": [[{ "node": "Upload to Google Drive",     "type": "main", "index": 0 }]] },
+    "Upload to Google Drive":   { "main": [[{ "node": "Merge Drive & Captions",     "type": "main", "index": 0 }]] },
+    "Merge Drive & Captions":   { "main": [[{ "node": "Trigger Social Poster",      "type": "main", "index": 0 }]] },
+    "Trigger Social Poster":    { "main": [[{ "node": "Collect Post IDs",           "type": "main", "index": 0 }]] },
+    "Collect Post IDs":         { "main": [[{ "node": "Mark PUBLISHED",             "type": "main", "index": 0 }]] },
+    "Mark PUBLISHED":           { "main": [[{ "node": "Generate Stage 2 Payload",   "type": "main", "index": 0 }]] }
+  },
+
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "meta": { "templateCredsSetupCompleted": false },
+  "id": "qpc-image-generator"
+}
