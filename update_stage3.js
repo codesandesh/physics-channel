@@ -121,29 +121,21 @@ if (bgmFile) {
   bgmT = bd;
 }
 
-// ── STEP 5: captions + logo ───────────────────────────────────────
+// ── STEP 5: captions ─────────────────────────────────────────────
 const assC   = toC(assP);
 const hasASS = run('docker exec qpc_ffmpeg_runner test -f "' + assC + '" && echo OK', 5000, true).includes('OK');
-const logoP  = '/ffmpeg/config/icon/logo.png';
-const hasLogo= run('docker exec qpc_ffmpeg_runner test -f "' + logoP + '" && echo OK', 5000, true).includes('OK');
-console.log('Captions: ' + (hasASS?'yes':'no') + ' | Logo: ' + (hasLogo?'yes':'no'));
+console.log('Captions: ' + (hasASS?'yes':'no'));
 
 // ── STEP 6: final render ──────────────────────────────────────────
 const inp = ['-i "' + xfade.cont + '"'];
 if (hasVoice) inp.push('-i "' + voiceC + '"');
 if (bgmT)     inp.push('-i "' + bgmT + '"');
-if (hasLogo)  inp.push('-i "' + logoP + '"');
 
 const vIdx = hasVoice ? 1 : -1;
 const bIdx = bgmT ? (hasVoice ? 2 : 1) : -1;
-const lIdx = hasLogo ? inp.length - 1 : -1;
 
 let vF = [], vL = '0:v', lb = 0;
 
-if (hasLogo) {
-  vF.push('['+lIdx+':v]scale=80:-1[ls];['+vL+'][ls]overlay=x=W-w-20:y=20:format=auto[vl'+lb+']');
-  vL = 'vl'+lb; lb++;
-}
 if (hasASS) {
   vF.push('['+vL+"]subtitles=filename='"+assC+"'[vv"+lb+']');
   vL = 'vv'+lb; lb++;
