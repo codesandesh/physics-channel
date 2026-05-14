@@ -59,17 +59,19 @@ console.log('Scene durations: ' + clipDurs.map((d,i)=>'S'+(i+1)+':'+d+'s').join(
 console.log('Total: ' + clipDurs.reduce((a,b)=>a+b,0).toFixed(2) + 's | Audio: ' + audioDur.toFixed(2) + 's');
 
 // ── STEP 1+2: normalize + time-stretch + motion per clip ──────────
+// Square (1080x1080) content centred in 1080x1920 with 420px black bars top/bottom
+// Oversample to 1188x1188 for Ken Burns headroom (108px travel each axis)
 function getCrop(preset, d) {
-  const px = ['(1188-1080)/2*(1-t/'+d+'):(2112-1920)/2*(1-t/'+d+')',
-               '(1188-1080)/2*t/'+d+':(2112-1920)/2*t/'+d,
-               '(1188-1080)/2*(1-t/'+d+')+20*t/'+d+':(2112-1920)/2*(1-t/'+d+')',
-               '(1188-1080)/2*t/'+d+':(2112-1920)/2*(1-t/'+d+')+30*t/'+d,
-               '(1188-1080)/4*(1-t/'+d+'):(2112-1920)/2*(1-t/'+d+')',
-               '(1188-1080)/2*(1-t/'+d+'):(2112-1920)/4*t/'+d];
+  const px = ['(1188-1080)/2*(1-t/'+d+'):(1188-1080)/2*(1-t/'+d+')',
+               '(1188-1080)/2*t/'+d+':(1188-1080)/2*t/'+d,
+               '(1188-1080)/2*(1-t/'+d+')+20*t/'+d+':(1188-1080)/2*(1-t/'+d+')',
+               '(1188-1080)/2*t/'+d+':(1188-1080)/2*(1-t/'+d+')+20*t/'+d,
+               '(1188-1080)/4*(1-t/'+d+'):(1188-1080)/2*(1-t/'+d+')',
+               '(1188-1080)/2*(1-t/'+d+'):(1188-1080)/4*t/'+d];
   return px[preset % 6];
 }
 
-console.log('Processing ' + N + ' clips with time-stretch + motion...');
+console.log('Processing ' + N + ' clips with time-stretch + square motion...');
 const processed = [];
 
 for (let i = 0; i < N; i++) {
@@ -81,7 +83,9 @@ for (let i = 0; i < N; i++) {
   const ptsF   = (dur / 5.0).toFixed(6);
   const fadeO  = Math.max(dur - 0.25, 0.1).toFixed(3);
   const crop   = getCrop(i, d);
-  const vf     = 'setpts=' + ptsF + '*PTS,scale=1188:2112:flags=lanczos,crop=1080:1920:' + crop + ',setsar=1,fps=24,fade=t=in:st=0:d=0.2,fade=t=out:st=' + fadeO + ':d=0.2';
+  // Fill 1188x1188 square (center-crop any aspect ratio), Ken Burns to 1080x1080,
+  // then pad into 1080x1920 with 420px black top and bottom
+  const vf     = 'setpts=' + ptsF + '*PTS,scale=1188:1188:force_original_aspect_ratio=increase:flags=lanczos,crop=1188:1188,crop=1080:1080:' + crop + ',pad=1080:1920:0:420:color=black,setsar=1,fps=24,fade=t=in:st=0:d=0.2,fade=t=out:st=' + fadeO + ':d=0.2';
 
   run('docker exec qpc_ffmpeg_runner ffmpeg -y -i "' + src + '" -vf "' + vf + '" -t ' + d + ' -c:v libx264 -crf 17 -preset fast -pix_fmt yuv420p -an "' + dst + '" && echo OK', 180000);
   processed.push({ n8n: dstH, cont: dst });
