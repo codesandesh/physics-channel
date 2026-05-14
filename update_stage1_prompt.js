@@ -94,14 +94,14 @@ VISUAL METAPHORS for abstract concepts (pick the one that matches the topic):
 - Breakdown / rebuild → structure fragmenting in slow motion then reassembling as something stronger
 - Hidden truth → surface appears one way, then cracks to reveal glowing different reality beneath
 
-ENERGY VEIN (required in EVERY scene — this is the channel signature):
-Glowing golden-orange energy veins pulse and crack through \${energy_vein_location} from inside — like liquid lightning — branching and flickering beneath the surface.
+ENERGY VEIN — THE CHANNEL SIGNATURE (required in EVERY scene, must be PROMINENT and BRIGHT):
+Bright molten golden-orange fire veins crack and branch visibly across \${energy_vein_location} — like glowing lava fractures or burning lightning scars etched across the surface — intensely luminous, radiating warm light outward onto the surrounding environment, crackling and flickering with raw living energy. The veins must be the BRIGHTEST element in the frame. They are NOT subtle — they are highly visible, tracing the subject's joints, muscles, bones, or body outline with intense fire-like glow, as if the body is lit from within by molten lava. The veins cast visible warm orange light onto the skin, fur, or surface around them.
 
 ATMOSPHERE — rotate through, EACH scene gets a DIFFERENT colour:
 deep teal / midnight blue / stormy grey / misty emerald / abyssal black / cold violet
 
 FULL PROMPT FORMAT per scene (follow this structure exactly):
-"Cinematic photorealistic 4K video, 9:16 vertical, 5 seconds. [SETUP: what the scene looks like at the start]. [ACTION: what visually happens or changes during the 5 seconds — this must directly illustrate the narration_segment words]. [VISUAL METAPHOR if the concept is abstract]. [ENERGY VEIN sentence]. [ATMOSPHERE colour for this scene — different from all others]. [CAMERA MOVE — different from all other scenes]. Volumetric god rays. Atmospheric haze. Shallow depth of field. Film grain texture. ARRI ALEXA cinematic color grade. Epic nature documentary tone. No motion blur. No text. No watermarks."
+"Cinematic photorealistic 4K video, 9:16 vertical, 5 seconds. [SETUP: what the scene looks like at the start]. [ACTION: what visually happens or changes during the 5 seconds — this must directly illustrate the narration_segment words]. [VISUAL METAPHOR if the concept is abstract]. Bright molten golden-orange fire veins crack and branch visibly across \${energy_vein_location} — like glowing lava fractures or burning lightning scars — intensely luminous, the brightest element in the frame, casting warm orange light onto the surrounding surface, crackling with living energy. [ATMOSPHERE colour for this scene — different from all others]. [CAMERA MOVE — different from all other scenes]. Volumetric god rays. Atmospheric haze. Shallow depth of field. Film grain texture. ARRI ALEXA cinematic color grade. Epic nature documentary tone. No motion blur. No text. No watermarks."
 
 NEGATIVE PROMPT (same for all scenes):
 "cartoon, anime, CGI animation, text, letters, numbers, labels, watermarks, blur, low quality, flat lighting, motion blur"
