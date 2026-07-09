@@ -130,9 +130,6 @@ services:
     volumes:
       - ./n8n:/home/node/.n8n
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./manim/scripts:/data/manim/scripts
-      - ./manim/renders:/data/manim/renders
-      - ./manim/combined:/data/manim/combined
       - ./ffmpeg/input:/data/ffmpeg/input
       - ./ffmpeg/output:/data/ffmpeg/output
       - ./ffmpeg/clips:/data/ffmpeg/clips
@@ -140,24 +137,7 @@ services:
       - ./config:/data/config
       - ./workflows:/data/workflows
 
-  manim-runner:
-    build:
-      context: ./manim
-      dockerfile: Dockerfile
-    container_name: phys_manim_runner
-    restart: always
-    networks:
-      - physics-pipeline-network
-    env_file:
-      - .env
-    environment:
-      - MANIM_SCRIPTS_DIR=${MANIM_SCRIPTS_DIR}
-      - MANIM_RENDERS_DIR=${MANIM_RENDERS_DIR}
-    volumes:
-      - ./manim/scripts:/manim/scripts
-      - ./manim/renders:/manim/renders
-      - ./manim/combined:/manim/combined
-    command: tail -f /dev/null
+  # manim-runner: disabled for now — add back when Stage 2 is needed
 
   ffmpeg-runner:
     build:
