@@ -13,12 +13,12 @@ jobs:
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.CONTABO_HOST }}
-          username: root
+          username: physics-deploy
           key: ${{ secrets.CONTABO_SSH_KEY }}
           script: |
             set -e
 
-            DEPLOY_DIR="/root/quantum-physics-channel"
+            DEPLOY_DIR="/home/physics-deploy/quantum-physics-channel"
 
             # Clone on first deploy, pull on subsequent
             # Uses fine-grained PAT scoped to this repo only (GH_DEPLOY_TOKEN secret)
