@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-07-09T07:19:44.141Z",
+  "updatedAt": "2026-07-09T07:44:23.762Z",
   "createdAt": "2026-04-25T10:04:59.493Z",
   "id": "Enqcg4qT5c2yNAe8",
   "name": "Physics Channel - Stage 3 - Social Media Upload",
@@ -24,15 +24,15 @@
       "typeVersion": 1.2,
       "position": [
         0,
-        300
+        304
       ]
     },
     {
       "parameters": {
+        "httpMethod": "POST",
         "path": "stage3-publish-next",
         "responseMode": "lastNode",
-        "options": {},
-        "httpMethod": "POST"
+        "options": {}
       },
       "id": "s3-webhook",
       "name": "Stage 3 Queue Webhook",
@@ -40,13 +40,12 @@
       "typeVersion": 2,
       "position": [
         0,
-        500
+        512
       ],
       "webhookId": "85549237-c67d-4170-9bcd-1938fdb815d4"
     },
     {
       "parameters": {
-        "method": "GET",
         "url": "https://sheets.googleapis.com/v4/spreadsheets/1VD-F6Wj47Dm_5Uo_zdIEuxOnqprepCPRTKEmTYs6mFs/values/Video%20Production%20Queue!A2:L1000",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "googleDriveOAuth2Api",
@@ -86,7 +85,8 @@
           "options": {
             "caseSensitive": true,
             "leftValue": "",
-            "typeValidation": "strict"
+            "typeValidation": "strict",
+            "version": 1
           },
           "conditions": [
             {
@@ -122,7 +122,7 @@
       "typeVersion": 2,
       "position": [
         1600,
-        600
+        608
       ]
     },
     {
@@ -142,7 +142,7 @@
       "typeVersion": 4.1,
       "position": [
         1600,
-        300
+        304
       ],
       "credentials": {
         "googleDriveOAuth2Api": {
@@ -161,7 +161,7 @@
       "typeVersion": 2,
       "position": [
         2000,
-        300
+        304
       ]
     },
     {
@@ -174,7 +174,7 @@
       "typeVersion": 2,
       "position": [
         2400,
-        300
+        304
       ]
     },
     {
@@ -211,7 +211,7 @@
       "typeVersion": 4.1,
       "position": [
         2800,
-        300
+        304
       ]
     },
     {
@@ -224,7 +224,7 @@
       "typeVersion": 2,
       "position": [
         3200,
-        300
+        304
       ]
     },
     {
@@ -237,7 +237,7 @@
       "typeVersion": 2,
       "position": [
         3600,
-        300
+        304
       ]
     },
     {
@@ -250,7 +250,7 @@
       "typeVersion": 2,
       "position": [
         4000,
-        100
+        112
       ],
       "onError": "continueRegularOutput"
     },
@@ -264,7 +264,7 @@
       "typeVersion": 2,
       "position": [
         4000,
-        300
+        304
       ],
       "onError": "continueRegularOutput"
     },
@@ -294,7 +294,7 @@
       "typeVersion": 4.1,
       "position": [
         4000,
-        700
+        704
       ],
       "onError": "continueRegularOutput"
     },
@@ -308,7 +308,7 @@
       "typeVersion": 2,
       "position": [
         5200,
-        300
+        304
       ]
     },
     {
@@ -328,7 +328,7 @@
       "typeVersion": 4.1,
       "position": [
         5600,
-        200
+        208
       ],
       "credentials": {
         "googleDriveOAuth2Api": {
@@ -380,7 +380,7 @@
       "typeVersion": 4.1,
       "position": [
         5600,
-        600
+        608
       ],
       "credentials": {
         "googleDriveOAuth2Api": {
@@ -399,22 +399,21 @@
       "typeVersion": 2,
       "position": [
         4400,
-        300
+        304
       ]
     },
     {
+      "parameters": {
+        "jsCode": "const https = require('https');\nconst data = $input.first().json;\n\nconst apiKey = $env.AYRSHARE_API_KEY;\nif (!apiKey) throw new Error('AYRSHARE_API_KEY not set');\n\nconst videoUrl = 'https://drive.google.com/uc?export=download&id=' + data.drive_file_id + '&confirm=t';\nconst caption  = ((data.instagram_caption || data.title || data.topic || '') + '\\n\\n' + (data.generated_hashtags || '')).slice(0, 2190);\n\nconst postBody = JSON.stringify({\n  post: caption,\n  platforms: ['instagram', 'tiktok'],\n  mediaUrls: [videoUrl],\n  instagramOptions: { reels: true },\n  socialAccounts: [\n    { platform: 'instagram', id: $env.AYRSHARE_PHYSICS_IG_PROFILE_ID },\n    { platform: 'tiktok',    id: $env.AYRSHARE_PHYSICS_TIKTOK_PROFILE_ID }\n  ]\n});\n\nconst result = await new Promise((resolve, reject) => {\n  const buf = Buffer.from(postBody);\n  const req = https.request({\n    hostname: 'app.ayrshare.com',\n    path: '/api/post',\n    method: 'POST',\n    headers: {\n      'Authorization': 'Bearer ' + apiKey,\n      'Content-Type': 'application/json',\n      'Content-Length': buf.length\n    }\n  }, res => {\n    let d = ''; res.on('data', c => d += c);\n    res.on('end', () => { try { resolve(JSON.parse(d)); } catch(e) { reject(new Error('Non-JSON: ' + d.slice(0,200))); } });\n  });\n  req.on('error', reject);\n  req.write(buf); req.end();\n});\n\nconsole.log('Ayrshare result:', JSON.stringify(result).slice(0, 300));\nif (result.status === 'error') throw new Error('Ayrshare error: ' + (result.message || JSON.stringify(result)));\n\nreturn [{ json: { ...data, ayrshare_ig_url: result.postIds?.find(p=>p.platform==='instagram')?.postUrl || '', ayrshare_tiktok_url: result.postIds?.find(p=>p.platform==='tiktok')?.postUrl || '' } }];"
+      },
       "id": "s3-ayrshare-001",
       "name": "Post to Ayrshare (IG + TikTok)",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        4200,
-        500
-      ],
-      "parameters": {
-        "mode": "runOnceForAllItems",
-        "jsCode": "const https = require('https');\nconst data = $input.first().json;\n\nconst apiKey = $env.AYRSHARE_API_KEY;\nif (!apiKey) throw new Error('AYRSHARE_API_KEY not set');\n\nconst videoUrl = 'https://drive.google.com/uc?export=download&id=' + data.drive_file_id + '&confirm=t';\nconst caption  = ((data.instagram_caption || data.title || data.topic || '') + '\\n\\n' + (data.generated_hashtags || '')).slice(0, 2190);\n\nconst postBody = JSON.stringify({\n  post: caption,\n  platforms: ['instagram', 'tiktok'],\n  mediaUrls: [videoUrl],\n  instagramOptions: { reels: true },\n  socialAccounts: [\n    { platform: 'instagram', id: $env.AYRSHARE_IG_PROFILE_ID },\n    { platform: 'tiktok',    id: $env.AYRSHARE_TIKTOK_PROFILE_ID }\n  ]\n});\n\nconst result = await new Promise((resolve, reject) => {\n  const buf = Buffer.from(postBody);\n  const req = https.request({\n    hostname: 'app.ayrshare.com',\n    path: '/api/post',\n    method: 'POST',\n    headers: {\n      'Authorization': 'Bearer ' + apiKey,\n      'Content-Type': 'application/json',\n      'Content-Length': buf.length\n    }\n  }, res => {\n    let d = ''; res.on('data', c => d += c);\n    res.on('end', () => { try { resolve(JSON.parse(d)); } catch(e) { reject(new Error('Non-JSON: ' + d.slice(0,200))); } });\n  });\n  req.on('error', reject);\n  req.write(buf); req.end();\n});\n\nconsole.log('Ayrshare result:', JSON.stringify(result).slice(0, 300));\nif (result.status === 'error') throw new Error('Ayrshare error: ' + (result.message || JSON.stringify(result)));\n\nreturn [{ json: { ...data, ayrshare_ig_url: result.postIds?.find(p=>p.platform==='instagram')?.postUrl || '', ayrshare_tiktok_url: result.postIds?.find(p=>p.platform==='tiktok')?.postUrl || '' } }];"
-      }
+        3760,
+        672
+      ]
     }
   ],
   "connections": {
@@ -654,9 +653,9 @@
   },
   "meta": null,
   "pinData": {},
-  "versionId": "5b445629-d896-4bae-8695-4b6300221ebc",
+  "versionId": "afdee729-1b19-485a-be01-31524154d2d5",
   "activeVersionId": null,
-  "versionCounter": 319,
+  "versionCounter": 322,
   "triggerCount": 2,
   "tags": [],
   "activeVersion": null
