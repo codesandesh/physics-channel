@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-07-09T06:56:37.322Z",
+  "updatedAt": "2026-07-09T07:19:44.141Z",
   "createdAt": "2026-04-25T10:04:59.493Z",
   "id": "Enqcg4qT5c2yNAe8",
   "name": "Physics Channel - Stage 3 - Social Media Upload",
@@ -403,8 +403,8 @@
       ]
     },
     {
-      "id": "s3-ig-upload-001",
-      "name": "Upload to Instagram",
+      "id": "s3-ayrshare-001",
+      "name": "Post to Ayrshare (IG + TikTok)",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
@@ -413,21 +413,7 @@
       ],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const https = require('https');\nconst data = $input.first().json;\n\nfunction call(method, path, body) {\n  return new Promise((resolve, reject) => {\n    const buf = body ? Buffer.from(body) : null;\n    const opts = { hostname: 'graph.facebook.com', path, method, headers: {} };\n    if (buf) { opts.headers['Content-Type'] = 'application/x-www-form-urlencoded'; opts.headers['Content-Length'] = buf.length; }\n    const req = https.request(opts, (res) => {\n      const chunks = [];\n      res.on('data', c => chunks.push(c));\n      res.on('end', () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString())); } catch(e) { reject(new Error('Non-JSON from IG: ' + Buffer.concat(chunks).toString().slice(0,200))); } });\n    });\n    req.on('error', reject);\n    if (buf) req.write(buf);\n    req.end();\n  });\n}\n\ntry {\n  const igUserId = $env.INSTAGRAM_BUSINESS_ACCOUNT_ID;\n  const token    = $env.FB_PAGE_ACCESS_TOKEN;\n  if (!igUserId || !token) throw new Error('INSTAGRAM_BUSINESS_ACCOUNT_ID / FB_PAGE_ACCESS_TOKEN not set');\n\n  const videoUrl = 'https://drive.google.com/uc?export=download&id=' + data.drive_file_id + '&confirm=t';\n  const caption  = ((data.instagram_caption || data.title || data.topic || '') + '\\n\\n' + (data.generated_hashtags || '')).slice(0, 2190);\n\n  const createBody = 'media_type=REELS&video_url=' + encodeURIComponent(videoUrl) +\n    '&caption=' + encodeURIComponent(caption) + '&access_token=' + encodeURIComponent(token);\n  const create = await call('POST', '/v20.0/' + igUserId + '/media', createBody);\n  if (!create.id) throw new Error('IG container create failed: ' + JSON.stringify(create).slice(0,300));\n\n  let status = 'IN_PROGRESS', tries = 0;\n  while (status === 'IN_PROGRESS' && tries < 20) {\n    await new Promise(r => setTimeout(r, 5000));\n    const check = await call('GET', '/v20.0/' + create.id + '?fields=status_code&access_token=' + encodeURIComponent(token), null);\n    status = check.status_code || 'ERROR';\n    tries++;\n  }\n  if (status !== 'FINISHED') throw new Error('IG container never finished: ' + status);\n\n  const publishBody = 'creation_id=' + create.id + '&access_token=' + encodeURIComponent(token);\n  const publish = await call('POST', '/v20.0/' + igUserId + '/media_publish', publishBody);\n  if (!publish.id) throw new Error('IG publish failed: ' + JSON.stringify(publish).slice(0,300));\n\n  const perm = await call('GET', '/v20.0/' + publish.id + '?fields=permalink&access_token=' + encodeURIComponent(token), null);\n  console.log('Instagram Reels OK -> ' + publish.id);\n  return [{ json: { platform: 'instagram', success: true, url: perm.permalink || ('https://www.instagram.com/reel/' + publish.id) } }];\n} catch(e) {\n  console.error('Instagram upload failed: ' + e.message);\n  return [{ json: { platform: 'instagram', success: false, error: e.message } }];\n}"
-      }
-    },
-    {
-      "id": "s3-tt-upload-002",
-      "name": "Upload to TikTok",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        4200,
-        700
-      ],
-      "parameters": {
-        "mode": "runOnceForAllItems",
-        "jsCode": "const https = require('https');\nconst data = $input.first().json;\n\nfunction call(path, body, token) {\n  return new Promise((resolve, reject) => {\n    const buf = Buffer.from(JSON.stringify(body));\n    const req = https.request({ hostname: 'open.tiktokapis.com', path, method: 'POST', headers: {\n      'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json; charset=UTF-8', 'Content-Length': buf.length\n    }}, (res) => {\n      const chunks = [];\n      res.on('data', c => chunks.push(c));\n      res.on('end', () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString())); } catch(e) { reject(new Error('Non-JSON from TikTok')); } });\n    });\n    req.on('error', reject);\n    req.write(buf);\n    req.end();\n  });\n}\n\ntry {\n  const token = $env.TIKTOK_ACCESS_TOKEN;\n  if (!token) throw new Error('TIKTOK_ACCESS_TOKEN not set');\n  const privacyLevel = $env.TIKTOK_APP_AUDITED === 'true' ? 'PUBLIC_TO_EVERYONE' : 'SELF_ONLY';\n  const videoUrl = 'https://drive.google.com/uc?export=download&id=' + data.drive_file_id + '&confirm=t';\n\n  const init = await call('/v2/post/publish/video/init/', {\n    post_info: { title: (data.title || data.topic || 'Quantum Physics').slice(0, 150), privacy_level: privacyLevel, disable_duet: false, disable_comment: false, disable_stitch: false },\n    source_info: { source: 'PULL_FROM_URL', video_url: videoUrl }\n  }, token);\n\n  const publishId = init.data && init.data.publish_id;\n  if (!publishId) throw new Error('TikTok init failed: ' + JSON.stringify(init).slice(0,300));\n\n  let status = 'PROCESSING_UPLOAD', tries = 0;\n  while ((status === 'PROCESSING_UPLOAD' || status === 'PROCESSING_DOWNLOAD') && tries < 20) {\n    await new Promise(r => setTimeout(r, 5000));\n    const check = await call('/v2/post/publish/status/fetch/', { publish_id: publishId }, token);\n    status = (check.data && check.data.status) || 'FAILED';\n    tries++;\n  }\n  if (status !== 'PUBLISH_COMPLETE') throw new Error('TikTok never completed: ' + status + (privacyLevel === 'SELF_ONLY' ? ' (app unaudited -> posted as private draft)' : ''));\n\n  console.log('TikTok OK -> ' + publishId);\n  return [{ json: { platform: 'tiktok', success: true, publish_id: publishId } }];\n} catch(e) {\n  console.error('TikTok upload failed: ' + e.message);\n  return [{ json: { platform: 'tiktok', success: false, error: e.message } }];\n}"
+        "jsCode": "const https = require('https');\nconst data = $input.first().json;\n\nconst apiKey = $env.AYRSHARE_API_KEY;\nif (!apiKey) throw new Error('AYRSHARE_API_KEY not set');\n\nconst videoUrl = 'https://drive.google.com/uc?export=download&id=' + data.drive_file_id + '&confirm=t';\nconst caption  = ((data.instagram_caption || data.title || data.topic || '') + '\\n\\n' + (data.generated_hashtags || '')).slice(0, 2190);\n\nconst postBody = JSON.stringify({\n  post: caption,\n  platforms: ['instagram', 'tiktok'],\n  mediaUrls: [videoUrl],\n  instagramOptions: { reels: true },\n  socialAccounts: [\n    { platform: 'instagram', id: $env.AYRSHARE_IG_PROFILE_ID },\n    { platform: 'tiktok',    id: $env.AYRSHARE_TIKTOK_PROFILE_ID }\n  ]\n});\n\nconst result = await new Promise((resolve, reject) => {\n  const buf = Buffer.from(postBody);\n  const req = https.request({\n    hostname: 'app.ayrshare.com',\n    path: '/api/post',\n    method: 'POST',\n    headers: {\n      'Authorization': 'Bearer ' + apiKey,\n      'Content-Type': 'application/json',\n      'Content-Length': buf.length\n    }\n  }, res => {\n    let d = ''; res.on('data', c => d += c);\n    res.on('end', () => { try { resolve(JSON.parse(d)); } catch(e) { reject(new Error('Non-JSON: ' + d.slice(0,200))); } });\n  });\n  req.on('error', reject);\n  req.write(buf); req.end();\n});\n\nconsole.log('Ayrshare result:', JSON.stringify(result).slice(0, 300));\nif (result.status === 'error') throw new Error('Ayrshare error: ' + (result.message || JSON.stringify(result)));\n\nreturn [{ json: { ...data, ayrshare_ig_url: result.postIds?.find(p=>p.platform==='instagram')?.postUrl || '', ayrshare_tiktok_url: result.postIds?.find(p=>p.platform==='tiktok')?.postUrl || '' } }];"
       }
     }
   ],
@@ -558,12 +544,7 @@
             "index": 0
           },
           {
-            "node": "Upload to Instagram",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "Upload to TikTok",
+            "node": "Post to Ayrshare (IG + TikTok)",
             "type": "main",
             "index": 0
           }
@@ -650,14 +631,15 @@
         ]
       ]
     },
-    "Upload to Instagram": {
+    "Post to Ayrshare (IG + TikTok)": {
       "main": [
-        []
-      ]
-    },
-    "Upload to TikTok": {
-      "main": [
-        []
+        [
+          {
+            "node": "Prep Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     }
   },
@@ -672,9 +654,9 @@
   },
   "meta": null,
   "pinData": {},
-  "versionId": "9d072f37-0475-4e88-b032-83c0f92682d1",
+  "versionId": "5b445629-d896-4bae-8695-4b6300221ebc",
   "activeVersionId": null,
-  "versionCounter": 318,
+  "versionCounter": 319,
   "triggerCount": 2,
   "tags": [],
   "activeVersion": null

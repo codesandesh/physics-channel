@@ -126,6 +126,10 @@ services:
       - INSTAGRAM_BUSINESS_ACCOUNT_ID=${INSTAGRAM_BUSINESS_ACCOUNT_ID}
       - TIKTOK_ACCESS_TOKEN=${TIKTOK_ACCESS_TOKEN}
       - TIKTOK_APP_AUDITED=${TIKTOK_APP_AUDITED}
+      # Ayrshare (unified IG + TikTok posting)
+      - AYRSHARE_API_KEY=${AYRSHARE_API_KEY}
+      - AYRSHARE_IG_PROFILE_ID=${AYRSHARE_IG_PROFILE_ID}
+      - AYRSHARE_TIKTOK_PROFILE_ID=${AYRSHARE_TIKTOK_PROFILE_ID}
     volumes:
       # n8n data (workflows, credentials, execution history)
       - ./n8n:/home/node/.n8n
