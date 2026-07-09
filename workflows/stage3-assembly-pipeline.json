@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-07-09T07:44:23.762Z",
+  "updatedAt": "2026-07-09T07:46:55.834Z",
   "createdAt": "2026-04-25T10:04:59.493Z",
   "id": "Enqcg4qT5c2yNAe8",
   "name": "Physics Channel - Stage 3 - Social Media Upload",
@@ -13,7 +13,7 @@
           "interval": [
             {
               "field": "cronExpression",
-              "expression": "0 * * * *"
+              "expression": "0 */12 * * *"
             }
           ]
         }
@@ -653,9 +653,9 @@
   },
   "meta": null,
   "pinData": {},
-  "versionId": "afdee729-1b19-485a-be01-31524154d2d5",
+  "versionId": "7a9e173e-1a10-49ae-8a90-14a4eb0f4531",
   "activeVersionId": null,
-  "versionCounter": 322,
+  "versionCounter": 323,
   "triggerCount": 2,
   "tags": [],
   "activeVersion": null

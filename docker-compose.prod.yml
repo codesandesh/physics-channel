@@ -1,0 +1,185 @@
+version: "3.8"
+
+# ═══════════════════════════════════════════════════════════════
+#  Quantum Physics Channel Pipeline  —  PRODUCTION (Contabo)
+#  Port 5679 · Network: physics-pipeline-network
+#  All names prefixed with phys_ to avoid collisions
+# ═══════════════════════════════════════════════════════════════
+
+networks:
+  physics-pipeline-network:
+    driver: bridge
+
+services:
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: phys_postgres
+    restart: always
+    networks:
+      - physics-pipeline-network
+    env_file:
+      - .env
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    # No external port — internal only (security)
+    expose:
+      - "5432"
+    volumes:
+      - phys_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  n8n:
+    build:
+      context: ./n8n
+      dockerfile: Dockerfile
+    container_name: phys_n8n
+    restart: always
+    user: root
+    ports:
+      - "5679:5679"
+    networks:
+      - physics-pipeline-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD}
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+      - N8N_HOST=0.0.0.0
+      - N8N_PORT=5679
+      - N8N_RUNNERS_DISABLED=true
+      - N8N_RUNNERS_BROKER_PORT=5685
+      - N8N_PROTOCOL=http
+      - WEBHOOK_URL=${N8N_WEBHOOK_BASE_URL}
+      - GENERIC_TIMEZONE=UTC
+      - TZ=UTC
+      - N8N_BLOCK_ENV_ACCESS_IN_JS=false
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
+      - NODE_FUNCTION_ALLOW_BUILTIN=child_process,fs,path,os,https,http
+      - NODE_OPTIONS=--max-old-space-size=2560
+      - N8N_RUNNERS_HEARTBEAT_INTERVAL=600
+      - N8N_RUNNERS_TASK_TIMEOUT=14400
+      - N8N_RUNNERS_MAX_OLD_SPACE_SIZE=2560
+      - N8N_FILES_ALLOWED_PATHS=/data/ffmpeg/input,/data/ffmpeg/output,/data/ffmpeg/clips,/data/uploads,/data/config
+      - N8N_USER_FOLDER=/home/node/.n8n
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=postgres
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_DATABASE=${POSTGRES_DB}
+      - DB_POSTGRESDB_USER=${POSTGRES_USER}
+      - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD}
+      - GOOGLE_DRIVE_FOLDER_ID=${GOOGLE_DRIVE_FOLDER_ID}
+      - GOOGLE_DRIVE_FOLDER_ID_IMAGES=${GOOGLE_DRIVE_FOLDER_ID_IMAGES}
+      - GOOGLE_DRIVE_FOLDER_ID_VIDEOS=${GOOGLE_DRIVE_FOLDER_ID_VIDEOS}
+      - GOOGLE_SHEET_ID_IMAGE_POSTS=${GOOGLE_SHEET_ID_IMAGE_POSTS}
+      - GOOGLE_SHEET_ID=${GOOGLE_SHEET_ID}
+      - GOOGLE_SHEET_TAB_CONTENT_MASTER=${GOOGLE_SHEET_TAB_CONTENT_MASTER}
+      - GOOGLE_SHEET_TAB_VIDEO_QUEUE=${GOOGLE_SHEET_TAB_VIDEO_QUEUE}
+      - GOOGLE_SHEET_TAB_IMAGE_TOPICS=${GOOGLE_SHEET_TAB_IMAGE_TOPICS}
+      - GOOGLE_SHEET_TAB_IMAGE_QUEUE=${GOOGLE_SHEET_TAB_IMAGE_QUEUE}
+      - SERVER_BASE_URL=${SERVER_BASE_URL}
+      - APPS_SCRIPT_CALLBACK_URL=${APPS_SCRIPT_CALLBACK_URL}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GOOGLE_AI_API_KEY=${GOOGLE_AI_API_KEY}
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY}
+      - ELEVENLABS_API_KEY_APERTURE=${ELEVENLABS_API_KEY_APERTURE}
+      - ELEVENLABS_VOICE_ID=${ELEVENLABS_VOICE_ID}
+      - ELEVENLABS_VOICE_ID_APERTURE=${ELEVENLABS_VOICE_ID_APERTURE}
+      - HEYGEN_API_KEY=${HEYGEN_API_KEY}
+      - HEYGEN_AVATAR_ID=${HEYGEN_AVATAR_ID}
+      - YOUTUBE_CHANNEL_ID=${YOUTUBE_CHANNEL_ID}
+      - YOUTUBE_OAUTH_CLIENT_ID=${YOUTUBE_OAUTH_CLIENT_ID}
+      - YOUTUBE_OAUTH_CLIENT_SECRET=${YOUTUBE_OAUTH_CLIENT_SECRET}
+      - YOUTUBE_REFRESH_TOKEN=${YOUTUBE_REFRESH_TOKEN}
+      - WAVESPEED_API_KEY=${WAVESPEED_API_KEY}
+      - VASTAI_GPU1_URL=${VASTAI_GPU1_URL}
+      - VASTAI_GPU1_TOKEN=${VASTAI_GPU1_TOKEN}
+      - VASTAI_GPU1_API_KEY=${VASTAI_GPU1_API_KEY}
+      - VASTAI_VIDEO_URL=${VASTAI_VIDEO_URL}
+      - VASTAI_VIDEO_API_KEY=${VASTAI_VIDEO_API_KEY}
+      - VASTAI_VIDEO_WORKER=${VASTAI_VIDEO_WORKER}
+      - TAVILY_API_KEY=${TAVILY_API_KEY}
+      - FB_PAGE_ID=${FB_PAGE_ID}
+      - FB_APP_ID=${FB_APP_ID}
+      - FB_USER_ACCESS_TOKEN=${FB_USER_ACCESS_TOKEN}
+      - FB_PAGE_ACCESS_TOKEN=${FB_PAGE_ACCESS_TOKEN}
+      - LINKEDIN_ORGANIZATION_ID=${LINKEDIN_ORGANIZATION_ID}
+      - INSTAGRAM_BUSINESS_ACCOUNT_ID=${INSTAGRAM_BUSINESS_ACCOUNT_ID}
+      - TIKTOK_ACCESS_TOKEN=${TIKTOK_ACCESS_TOKEN}
+      - TIKTOK_APP_AUDITED=${TIKTOK_APP_AUDITED}
+      - AYRSHARE_API_KEY=${AYRSHARE_API_KEY}
+      - AYRSHARE_PHYSICS_IG_PROFILE_ID=${AYRSHARE_PHYSICS_IG_PROFILE_ID}
+      - AYRSHARE_PHYSICS_TIKTOK_PROFILE_ID=${AYRSHARE_PHYSICS_TIKTOK_PROFILE_ID}
+      - AYRSHARE_APERTURE_IG_PROFILE_ID=${AYRSHARE_APERTURE_IG_PROFILE_ID}
+      - AYRSHARE_APERTURE_TIKTOK_PROFILE_ID=${AYRSHARE_APERTURE_TIKTOK_PROFILE_ID}
+      - AYRSHARE_SHN_IG_PROFILE_ID=${AYRSHARE_SHN_IG_PROFILE_ID}
+      - AYRSHARE_SHN_TIKTOK_PROFILE_ID=${AYRSHARE_SHN_TIKTOK_PROFILE_ID}
+      - AYRSHARE_FITNESS_IG_PROFILE_ID=${AYRSHARE_FITNESS_IG_PROFILE_ID}
+      - AYRSHARE_FITNESS_TIKTOK_PROFILE_ID=${AYRSHARE_FITNESS_TIKTOK_PROFILE_ID}
+    volumes:
+      - ./n8n:/home/node/.n8n
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./manim/scripts:/data/manim/scripts
+      - ./manim/renders:/data/manim/renders
+      - ./manim/combined:/data/manim/combined
+      - ./ffmpeg/input:/data/ffmpeg/input
+      - ./ffmpeg/output:/data/ffmpeg/output
+      - ./ffmpeg/clips:/data/ffmpeg/clips
+      - ./uploads:/data/uploads
+      - ./config:/data/config
+      - ./workflows:/data/workflows
+
+  manim-runner:
+    build:
+      context: ./manim
+      dockerfile: Dockerfile
+    container_name: phys_manim_runner
+    restart: always
+    networks:
+      - physics-pipeline-network
+    env_file:
+      - .env
+    environment:
+      - MANIM_SCRIPTS_DIR=${MANIM_SCRIPTS_DIR}
+      - MANIM_RENDERS_DIR=${MANIM_RENDERS_DIR}
+    volumes:
+      - ./manim/scripts:/manim/scripts
+      - ./manim/renders:/manim/renders
+      - ./manim/combined:/manim/combined
+    command: tail -f /dev/null
+
+  ffmpeg-runner:
+    build:
+      context: ./ffmpeg
+      dockerfile: Dockerfile
+    container_name: phys_ffmpeg_runner
+    restart: always
+    networks:
+      - physics-pipeline-network
+    env_file:
+      - .env
+    environment:
+      - FFMPEG_INPUT_DIR=${FFMPEG_INPUT_DIR}
+      - FFMPEG_OUTPUT_DIR=${FFMPEG_OUTPUT_DIR}
+    volumes:
+      - ./ffmpeg/input:/ffmpeg/input
+      - ./ffmpeg/output:/ffmpeg/output
+      - ./ffmpeg/clips:/ffmpeg/clips
+      - ./uploads:/ffmpeg/uploads
+      - ./config:/ffmpeg/config
+      - ./manim/renders:/ffmpeg/manim_renders
+    command: tail -f /dev/null
+
+volumes:
+  phys_postgres_data:

@@ -14,7 +14,9 @@
 *.gif
 
 # ── Runtime data (container-generated) ───────────────────────
-n8n/
+# n8n data files (credentials DB, executions) — keep Dockerfile
+n8n/*
+!n8n/Dockerfile
 manim/scripts/*.py
 manim/renders/
 manim/combined/
@@ -35,3 +37,14 @@ DockerDesktopWSL/
 
 # ── Docker build cache ────────────────────────────────────────
 *.log
+
+# ── Node ─────────────────────────────────────────────────────
+node_modules/
+package-lock.json
+
+# ── Temp / scratch files ─────────────────────────────────────
+*.json.bak
+exec*.json
+*_full.json
+D\:*
+C\:*

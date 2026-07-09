@@ -1,0 +1,43 @@
+name: Deploy to Contabo
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.CONTABO_HOST }}
+          username: root
+          key: ${{ secrets.CONTABO_SSH_KEY }}
+          script: |
+            set -e
+
+            DEPLOY_DIR="/root/quantum-physics-channel"
+
+            # Clone on first deploy, pull on subsequent
+            if [ ! -d "$DEPLOY_DIR/.git" ]; then
+              git clone https://x-access-token:${{ secrets.GH_DEPLOY_TOKEN }}@github.com/scale-build-ai/quantum-physics-channel.git "$DEPLOY_DIR"
+            else
+              cd "$DEPLOY_DIR"
+              git pull origin main
+            fi
+
+            cd "$DEPLOY_DIR"
+
+            # .env must exist on server (created manually once, never committed)
+            if [ ! -f .env ]; then
+              echo "ERROR: .env file missing at $DEPLOY_DIR/.env — create it first"
+              exit 1
+            fi
+
+            # Build and restart only changed containers
+            docker compose -f docker-compose.prod.yml up -d --build --remove-orphans
+
+            echo "✅ Deploy complete"
+            docker compose -f docker-compose.prod.yml ps
