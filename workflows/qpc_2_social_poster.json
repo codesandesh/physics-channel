@@ -1,5 +1,11 @@
 {
+  "updatedAt": "2026-07-09T06:56:37.283Z",
+  "createdAt": "2026-04-25T10:04:59.831Z",
+  "id": "sMzXt7yCpNB7c520",
   "name": "QPC 2 - Social Media Poster",
+  "description": null,
+  "active": true,
+  "isArchived": false,
   "nodes": [
     {
       "parameters": {
@@ -89,7 +95,7 @@
       "credentials": {
         "googleDriveOAuth2Api": {
           "id": "dwOT4VyMlmKAS9om",
-          "name": "Google Drive account (new)"
+          "name": "Google Drive account"
         }
       }
     },
@@ -223,7 +229,7 @@
           "interval": [
             {
               "field": "cronExpression",
-              "expression": "0 * * * *"
+              "expression": "0 */2 * * *"
             }
           ]
         }
@@ -256,7 +262,7 @@
       "credentials": {
         "googleDriveOAuth2Api": {
           "id": "dwOT4VyMlmKAS9om",
-          "name": "Google Drive account (new)"
+          "name": "Google Drive account"
         }
       }
     },
@@ -295,7 +301,7 @@
       "credentials": {
         "googleDriveOAuth2Api": {
           "id": "dwOT4VyMlmKAS9om",
-          "name": "Google Drive account (new)"
+          "name": "Google Drive account"
         }
       }
     },
@@ -366,8 +372,148 @@
       "credentials": {
         "googleDriveOAuth2Api": {
           "id": "dwOT4VyMlmKAS9om",
-          "name": "Google Drive account (new)"
+          "name": "Google Drive account"
         }
+      }
+    },
+    {
+      "id": "ig-reel-create-001",
+      "name": "Create IG Reel Video",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        520
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const { execSync } = require('child_process');\nconst fs = require('fs');\nconst path = require('path');\n\nconst ts = Date.now();\nconst imgBuf = await this.helpers.getBinaryDataBuffer($input.item, 'data');\nconst imgPath_n8n    = `/data/ffmpeg/input/qpc_reel_${ts}.jpg`;\nconst imgPath_ffmpeg = `/ffmpeg/input/qpc_reel_${ts}.jpg`;\nconst outPath_n8n    = `/data/ffmpeg/output/qpc_reel_${ts}.mp4`;\nconst outPath_ffmpeg = `/ffmpeg/output/qpc_reel_${ts}.mp4`;\n\nfs.writeFileSync(imgPath_n8n, imgBuf);\n\nconst bgmDir = '/ffmpeg/config/bgm_aperture';\nconst bgmRaw = execSync(\n  `docker exec qpc_ffmpeg_runner bash -c \"ls ${bgmDir}/*.mp3 2>/dev/null\"`,\n  { encoding: 'utf-8' }\n).trim();\nconst bgmList = bgmRaw.split('\\n').filter(Boolean);\nif (!bgmList.length) throw new Error('No BGM files found at ' + bgmDir);\nconst bgm = bgmList[Math.floor(Math.random() * bgmList.length)];\n\nconst scale = 'scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=black';\nconst ffCmd = `ffmpeg -y -loop 1 -i '${imgPath_ffmpeg}' -i '${bgm}' -c:v libx264 -t 20 -pix_fmt yuv420p -vf \"${scale}\" -c:a aac -b:a 128k -movflags +faststart '${outPath_ffmpeg}'`;\n\nexecSync(`docker exec qpc_ffmpeg_runner bash -c ${JSON.stringify(ffCmd)}`,\n  { timeout: 120000, encoding: 'utf-8' });\n\ntry { fs.unlinkSync(imgPath_n8n); } catch(e) {}\n\nreturn {\n  json: {\n    ...$input.item.json,\n    reelVideoPath: outPath_n8n,\n    reelJobId: ts,\n    bgmUsed: path.basename(bgm)\n  }\n};"
+      }
+    },
+    {
+      "id": "ig-reel-getuid-002",
+      "name": "Get IG User ID",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1120,
+        520
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://graph.facebook.com/v20.0/{{ $env.FB_PAGE_ID }}",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "fields",
+              "value": "instagram_business_account"
+            },
+            {
+              "name": "access_token",
+              "value": "={{ $env.FB_PAGE_ACCESS_TOKEN }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "ig-reel-container-003",
+      "name": "Create IG Reel Container",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1340,
+        520
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://graph.facebook.com/v20.0/' + $json.instagram_business_account.id + '/media' }}",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "media_type",
+              "value": "REELS"
+            },
+            {
+              "name": "upload_type",
+              "value": "resumable"
+            },
+            {
+              "name": "caption",
+              "value": "={{ $('Create IG Reel Video').item.json.instagram_caption }}"
+            },
+            {
+              "name": "share_to_feed",
+              "value": "true"
+            },
+            {
+              "name": "access_token",
+              "value": "={{ $env.FB_PAGE_ACCESS_TOKEN }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "ig-reel-upload-004",
+      "name": "Upload Reel Video",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        520
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const fs    = require('fs');\nconst https = require('https');\n\nconst reelPath  = $('Create IG Reel Video').item.json.reelVideoPath;\nconst uploadUri = $('Create IG Reel Container').item.json.uri;\nconst token     = $env.FB_PAGE_ACCESS_TOKEN;\n\nif (!fs.existsSync(reelPath)) throw new Error('Reel video not found: ' + reelPath);\nconst videoBuf = fs.readFileSync(reelPath);\nconst fileSize  = videoBuf.length;\nconst url = new URL(uploadUri);\n\nconst result = await new Promise((resolve, reject) => {\n  const req = https.request({\n    hostname: url.hostname,\n    path:     url.pathname + url.search,\n    method:   'POST',\n    headers: {\n      'Authorization':  `OAuth ${token}`,\n      'offset':         '0',\n      'file_size':      String(fileSize),\n      'Content-Type':   'video/mp4',\n      'Content-Length': fileSize\n    }\n  }, res => {\n    let d = '';\n    res.on('data', c => d += c);\n    res.on('end', () => resolve({ statusCode: res.statusCode, body: d }));\n  });\n  req.on('error', reject);\n  req.write(videoBuf);\n  req.end();\n});\n\ntry { fs.unlinkSync(reelPath); } catch(e) {}\nif (result.statusCode >= 300) throw new Error(`Upload failed ${result.statusCode}: ${result.body}`);\n\nreturn {\n  json: {\n    ig_user_id:    $('Get IG User ID').item.json.instagram_business_account.id,\n    creation_id:   $('Create IG Reel Container').item.json.id,\n    upload_status: result.body\n  }\n};"
+      }
+    },
+    {
+      "id": "ig-reel-sleep-005",
+      "name": "Wait IG Processing",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1780,
+        520
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "await new Promise(r => setTimeout(r, 45000));\nreturn $input.all();"
+      }
+    },
+    {
+      "id": "ig-reel-publish-006",
+      "name": "Publish IG Reel",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        2000,
+        520
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://graph.facebook.com/v20.0/' + $json.ig_user_id + '/media_publish' }}",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "creation_id",
+              "value": "={{ $json.creation_id }}"
+            },
+            {
+              "name": "access_token",
+              "value": "={{ $env.FB_PAGE_ACCESS_TOKEN }}"
+            }
+          ]
+        },
+        "options": {}
       }
     }
   ],
@@ -453,6 +599,11 @@
           },
           {
             "node": "Make: LinkedIn Post",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Create IG Reel Video",
             "type": "main",
             "index": 0
           }
@@ -551,14 +702,862 @@
         ],
         []
       ]
+    },
+    "Create IG Reel Video": {
+      "main": [
+        [
+          {
+            "node": "Get IG User ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get IG User ID": {
+      "main": [
+        [
+          {
+            "node": "Create IG Reel Container",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create IG Reel Container": {
+      "main": [
+        [
+          {
+            "node": "Upload Reel Video",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload Reel Video": {
+      "main": [
+        [
+          {
+            "node": "Wait IG Processing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait IG Processing": {
+      "main": [
+        [
+          {
+            "node": "Publish IG Reel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Publish IG Reel": {
+      "main": [
+        [
+          {
+            "node": "Check Has Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
-  "active": false,
   "settings": {
-    "executionOrder": "v1"
+    "executionOrder": "v1",
+    "binaryMode": "separate"
   },
-  "meta": {
-    "templateCredsSetupCompleted": false
+  "staticData": {
+    "node:Publish Schedule Trigger": {
+      "recurrenceRules": []
+    }
   },
-  "id": "qpc-social-poster"
+  "meta": null,
+  "pinData": {},
+  "versionId": "229ea5dd-3332-4057-9218-8a3bca3835a7",
+  "activeVersionId": "229ea5dd-3332-4057-9218-8a3bca3835a7",
+  "versionCounter": 237,
+  "triggerCount": 2,
+  "tags": [],
+  "activeVersion": {
+    "updatedAt": "2026-07-09T06:56:37.286Z",
+    "createdAt": "2026-07-09T06:56:37.286Z",
+    "versionId": "229ea5dd-3332-4057-9218-8a3bca3835a7",
+    "workflowId": "sMzXt7yCpNB7c520",
+    "nodes": [
+      {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "qpc-social-post",
+          "responseMode": "responseNode",
+          "options": {}
+        },
+        "id": "s1",
+        "name": "Webhook Trigger",
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 1.1,
+        "position": [
+          -200,
+          -100
+        ],
+        "webhookId": "qpc-social-post"
+      },
+      {
+        "parameters": {},
+        "id": "manual-test-trigger",
+        "name": "Manual Test Trigger",
+        "type": "n8n-nodes-base.manualTrigger",
+        "typeVersion": 1,
+        "position": [
+          -200,
+          100
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "return [{\n  \"fileName\": \"schrodingers_cat_2026-04-27_1777266342208.png\",\n  \"headline\": \"Quantum discord, unlike entanglement, can persist in quantum systems even after they interact with their environment. This hidden correlation offers a new resource for quantum technologies that classical physics cannot explain.\",\n  \"facebook_caption\": \"Imagine a secret connection that survives even when things get noisy. The universe is full of hidden wonders, and quantum physics is revealing them one by one. These subtle links hint at a reality far stranger and more intricate than we often perceive.\\n\\nWe've discovered something called quantum discord. Unlike its famous cousin entanglement, discord can stick around even when quantum systems interact with their surroundings. Think of it as a lingering echo of correlation, a subtle relationship that doesn't easily fade away. It's a type of quantum connection that classical physics just cannot account for.\\n\\nThis persistence suggests that quantum information might be more robust than we thought. The environment usually acts like a chaotic force, breaking down delicate quantum states. However, discord shows us that some correlations can withstand this environmental onslaught, preserving a hidden order.\\n\\nThe implications are truly exciting for the future of quantum technology. This hidden correlation could be a brand new resource for building more powerful quantum computers and secure communication systems. It's a testament to the fact that nature still holds profound secrets waiting to be unlocked.\\n\\nWhat other hidden quantum connections are out there, waiting to be discovered and harnessed for our benefit? The quantum realm continues to surprise us with its depth and potential.\\n\\n#QuantumPhysics #QuantumMechanics #Science #Physics #QuantumComputing #QuantumInformation #ScienceFacts #Discovery #Universe #Technology #Research #QuantumCorrelations\",\n  \"linkedin_caption\": \"The fundamental nature of quantum correlations continues to challenge our understanding of physical reality. These non-classical connections are key to unlocking future technological paradigms. Exploring these phenomena pushes the boundaries of both theoretical physics and applied quantum engineering.\\n\\nRecent investigations highlight quantum discord, a form of quantum correlation distinct from entanglement. Discord possesses the unique characteristic of persisting in quantum systems despite decoherence caused by environmental interactions. This resilience suggests a more fundamental layer of quantum correlation than previously appreciated.\\n\\nUnlike entanglement, which is notoriously fragile and susceptible to environmental noise, quantum discord demonstrates a remarkable robustness. This implies that underlying quantum systems may retain usable correlations even in noisy, real-world conditions. The persistence of discord offers insight into the enduring nature of quantum relationships.\\n\\nThe discovery and characterization of quantum discord hold significant implications for quantum technologies. It presents a novel quantum resource that can potentially be exploited for quantum computation and communication protocols, particularly in environments where entanglement cannot be maintained. This opens new avenues for designing resilient quantum devices.\\n\\nFurther research into quantum discord is essential to fully understand its properties and potential applications. This phenomenon underscores the vast untapped potential residing within quantum mechanics for technological advancement.\\n\\n#QuantumPhysics #QuantumMechanics #Physics #Science #QuantumComputing #QuantumTechnology #Research #ScientificDiscovery #QuantumInformation #Decoherence #QuantumCorrelations #Innovation\",\n  \"instagram_caption\": \"The universe whispers secrets in ways we're only just beginning to hear. Beyond the familiar, a hidden quantum world thrives with unseen connections. These subtle links are reshaping our understanding of reality itself.\\n\\nMeet quantum discord, a fascinating phenomenon unlike entanglement. While entanglement can be easily broken by interaction with the environment, discord has a surprising ability to endure. It's a persistent, hidden correlation that classical physics simply cannot explain.\\n\\nThis resilience is key. It suggests that even when quantum systems are exposed to the noise of the outside world, a subtle form of quantum connection can survive. This is like a secret code that remains intact despite interference.\\n\\nThis discovery opens the door to new quantum technologies. Imagine quantum computers and secure communication networks that are more robust and reliable. Quantum discord could be the missing piece we need for truly advanced quantum systems.\\n\\nWhat other quantum secrets are waiting to be decoded?\\n\\n#QuantumPhysics #Science #Physics #QuantumMechanics #QuantumComputing #QuantumTech #Discovery #Universe #FutureTech #HiddenCorrelations #ScienceLover #QuantumWorld\",\n  \"tiktok_caption\": \"Okay, so the universe is WEIRD. Like, really weird. Quantum physics is where all the coolest, strangest secrets are hiding. Get ready, because this is wild.\\n\\nThere's this thing called quantum discord. Think of it as a secret handshake between quantum particles. Unlike entanglement, which is like a fragile phone call that drops easily, discord can survive even when the particles interact with everything around them. It's a hidden connection that classical physics just can't explain.\\n\\nSo, why is this a big deal? Because it means quantum stuff might be tougher than we thought. The environment usually messes with quantum states, but discord shows us some connections can actually hang on. It's like a quantum secret that stays secret.\\n\\nThis could totally change the game for quantum tech. We might be able to build super-powerful quantum computers and unbreakable communication systems using this hidden discord. It's a whole new resource we didn't even know we had!\\n\\nWhat do you think is the wildest quantum secret?\\n\\n#QuantumPhysics #Science #Physics #QuantumMechanics #QuantumComputing #QuantumInformation #SciTok #LearnOnTikTok #QuantumDiscovery #FutureTechnology #MindBlown #UniverseSecrets\",\n  \"drive_file_id\": \"1grm0RLdwj1KX46_yVXTatwQ-k5fhVooc\",\n  \"drive_url\": \"https://drive.usercontent.google.com/download?id=1grm0RLdwj1KX46_yVXTatwQ-k5fhVooc&export=download&confirm=t\"\n}];"
+        },
+        "id": "test-payload",
+        "name": "Test Payload",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          20,
+          100
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "const b = $input.item.json.body || $input.item.json;\nconst fileId = b.drive_file_id || '';\nconst driveUrl = fileId\n  ? `https://drive.usercontent.google.com/download?id=${fileId}&export=download&confirm=t`\n  : (b.drive_url || '');\nreturn [{ json: {\n  headline:          b.headline          || '',\n  facebook_caption:  b.facebook_caption  || b.headline || '',\n  linkedin_caption:  b.linkedin_caption  || b.headline || '',\n  instagram_caption: b.instagram_caption || b.facebook_caption || b.headline || '',\n  tiktok_caption:    b.tiktok_caption    || b.headline || '',\n  drive_file_id:     fileId,\n  drive_url:         driveUrl\n} }];"
+        },
+        "id": "s2",
+        "name": "Parse Webhook Body",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          240,
+          0
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "const data = $input.item.json;\n\nfunction clean(text) {\n  if (!text) return '';\n  // strip emojis\n  let res = text.replace(/[\\u{1F600}-\\u{1F64F}\\u{1F300}-\\u{1F5FF}\\u{1F680}-\\u{1F6FF}\\u{1F1E6}-\\u{1F1FF}\\u{2600}-\\u{26FF}\\u{2700}-\\u{27BF}]/gu, '');\n  // strip problematic chars but KEEP # (hashtags) and _ (used in hashtags)\n  res = res.replace(/[\\/\\\"*^%$@!~]/g, '');\n  return res.replace(/\\s+/g, ' ').trim();\n}\n\nreturn [{ json: {\n  ...data,\n  facebook_caption:  clean(data.facebook_caption),\n  linkedin_caption:  clean(data.linkedin_caption),\n  instagram_caption: clean(data.instagram_caption),\n  tiktok_caption:    clean(data.tiktok_caption)\n}}];"
+        },
+        "id": "clean-captions",
+        "name": "Clean Captions",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          460,
+          0
+        ]
+      },
+      {
+        "parameters": {
+          "operation": "download",
+          "fileId": {
+            "__rl": true,
+            "value": "={{ $json.drive_file_id }}",
+            "mode": "id"
+          },
+          "options": {}
+        },
+        "id": "s3",
+        "name": "Download Image from Drive",
+        "type": "n8n-nodes-base.googleDrive",
+        "typeVersion": 3,
+        "position": [
+          680,
+          0
+        ],
+        "credentials": {
+          "googleDriveOAuth2Api": {
+            "id": "dwOT4VyMlmKAS9om",
+            "name": "Google Drive account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "const binaryData = await this.helpers.getBinaryDataBuffer(0, 'data');\nconst binary = await this.helpers.prepareBinaryData(binaryData, 'physics_post.png', 'image/png');\nreturn [{\n  json: {\n    facebook_caption: $('Clean Captions').item.json.facebook_caption,\n    linkedin_caption: $('Clean Captions').item.json.linkedin_caption\n  },\n  binary: { data: binary }\n}];"
+        },
+        "id": "s4",
+        "name": "Prepare Image Data",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          900,
+          0
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "={{ 'https://graph.facebook.com/v20.0/' + $env.FB_PAGE_ID + '/photos' }}",
+          "sendBody": true,
+          "contentType": "multipart-form-data",
+          "bodyParameters": {
+            "parameters": [
+              {
+                "parameterType": "formBinaryData",
+                "name": "source",
+                "inputDataFieldName": "data"
+              },
+              {
+                "parameterType": "formData",
+                "name": "caption",
+                "value": "={{ $json.facebook_caption }}"
+              },
+              {
+                "parameterType": "formData",
+                "name": "access_token",
+                "value": "={{ $env.FB_PAGE_ACCESS_TOKEN }}"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "s5",
+        "name": "Post to Facebook",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.1,
+        "position": [
+          1120,
+          -100
+        ],
+        "continueOnFail": true
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://hook.eu1.make.com/2e6stpadypt34sjkhupvrk2czdgfilek",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ title: $('Clean Captions').item.json.headline, linkedin_caption: $('Clean Captions').item.json.linkedin_caption, media_url: $('Clean Captions').item.json.drive_url }) }}",
+          "options": {
+            "timeout": 60000
+          }
+        },
+        "id": "s6",
+        "name": "Make: LinkedIn Post",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.1,
+        "position": [
+          1120,
+          100
+        ],
+        "continueOnFail": true
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://hook.eu1.make.com/afl86f9h3471p6942yucl7qnjlgk3qro",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ post_type: 'image', media_url: $json.drive_url, title: $json.headline || '', linkedin_caption: $json.linkedin_caption, instagram_caption: $json.instagram_caption, tiktok_caption: $json.tiktok_caption, twitter_caption: $json.tiktok_caption }) }}",
+          "options": {
+            "timeout": 60000
+          }
+        },
+        "id": "make-multi-post",
+        "name": "Make: Multi-Platform Post",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4,
+        "position": [
+          680,
+          200
+        ],
+        "continueOnFail": true
+      },
+      {
+        "parameters": {
+          "respondWith": "json",
+          "responseBody": "={ \"status\": \"posted\", \"platforms\": [\"facebook\", \"linkedin\", \"instagram\", \"tiktok\"] }"
+        },
+        "id": "s10",
+        "name": "Respond to Webhook",
+        "type": "n8n-nodes-base.respondToWebhook",
+        "typeVersion": 1,
+        "position": [
+          2000,
+          0
+        ]
+      },
+      {
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "field": "cronExpression",
+                "expression": "0 */2 * * *"
+              }
+            ]
+          }
+        },
+        "id": "nP0",
+        "name": "Publish Schedule Trigger",
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.1,
+        "position": [
+          -200,
+          300
+        ]
+      },
+      {
+        "parameters": {
+          "method": "GET",
+          "url": "https://sheets.googleapis.com/v4/spreadsheets/1VD-F6Wj47Dm_5Uo_zdIEuxOnqprepCPRTKEmTYs6mFs/values/Image Post Queue!A2:M1000",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "googleDriveOAuth2Api",
+          "options": {}
+        },
+        "id": "nP1",
+        "name": "Read Queue Rows",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.1,
+        "position": [
+          20,
+          300
+        ],
+        "credentials": {
+          "googleDriveOAuth2Api": {
+            "id": "dwOT4VyMlmKAS9om",
+            "name": "Google Drive account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "const rows = $input.item.json?.values || [];\n// Columns: 0=ID,1=Topic,2=CustomHeadline,3=Status,4=CaptionsJSON,5=Headline,6=DriveFileId,7=DriveUrl,8=FBPostId,9=LIPostId,10=blank,11=PublishedAt,12=ReadyAt\nconst ready = rows\n  .map((r, i) => ({\n    rowIndex: i + 2,\n    status: (r[3] || '').toUpperCase().trim(),\n    captionsJson: r[4] || '',\n    headline: r[5] || '',\n    driveFileId: r[6] || '',\n    driveUrl: r[7] || ''\n  }))\n  .filter(r => r.status === 'READY' && r.driveFileId);\nif (ready.length === 0) {\n  throw new Error('NO_READY_ROWS: No READY rows found in Image Post Queue.');\n}\nconst first = ready[0];\nlet captions = {};\ntry { captions = JSON.parse(first.captionsJson); } catch (e) {}\nreturn [{ json: {\n  rowIndex:          first.rowIndex,\n  headline:          first.headline,\n  facebook_caption:  captions.facebook  || first.headline || '',\n  linkedin_caption:  captions.linkedin  || first.headline || '',\n  instagram_caption: captions.instagram || captions.facebook || first.headline || '',\n  tiktok_caption:    captions.tiktok    || first.headline || '',\n  drive_file_id:     first.driveFileId,\n  drive_url:         first.driveUrl\n} }];"
+        },
+        "id": "nP2",
+        "name": "Find First READY Row",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          240,
+          300
+        ]
+      },
+      {
+        "parameters": {
+          "method": "PUT",
+          "url": "={{ `https://sheets.googleapis.com/v4/spreadsheets/1VD-F6Wj47Dm_5Uo_zdIEuxOnqprepCPRTKEmTYs6mFs/values/Image Post Queue!D${$json.rowIndex}?valueInputOption=RAW` }}",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "googleDriveOAuth2Api",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={ \"values\": [[\"PUBLISHING\"]] }",
+          "options": {}
+        },
+        "id": "nP3",
+        "name": "Mark PUBLISHING",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.1,
+        "position": [
+          460,
+          380
+        ],
+        "credentials": {
+          "googleDriveOAuth2Api": {
+            "id": "dwOT4VyMlmKAS9om",
+            "name": "Google Drive account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "let rowIndex = null, headline = '', driveFileId = '', driveUrl = '';\ntry {\n  const d = $('Find First READY Row').item.json;\n  rowIndex = d.rowIndex; headline = d.headline; driveFileId = d.drive_file_id; driveUrl = d.drive_url;\n} catch (e) {}\nreturn [{ json: { hasRow: !!rowIndex, rowIndex, headline, driveFileId, driveUrl } }];"
+        },
+        "id": "nP4",
+        "name": "Check Has Row",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1340,
+          300
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict"
+            },
+            "conditions": [
+              {
+                "id": "c1",
+                "leftValue": "={{ $json.hasRow }}",
+                "rightValue": true,
+                "operator": {
+                  "type": "boolean",
+                  "operation": "equals"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "nP5",
+        "name": "IF Has Row Index?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          1560,
+          300
+        ]
+      },
+      {
+        "parameters": {
+          "method": "PUT",
+          "url": "={{ `https://sheets.googleapis.com/v4/spreadsheets/1VD-F6Wj47Dm_5Uo_zdIEuxOnqprepCPRTKEmTYs6mFs/values/Image Post Queue!D${$('Find First READY Row').item.json.rowIndex}:M${$('Find First READY Row').item.json.rowIndex}?valueInputOption=RAW` }}",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "googleDriveOAuth2Api",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ values: [[ 'PUBLISHED', '', $('Find First READY Row').item.json.headline, $('Find First READY Row').item.json.drive_file_id, $('Find First READY Row').item.json.drive_url, '', '', '', new Date().toISOString(), '' ]] }) }}",
+          "options": {}
+        },
+        "id": "nP6",
+        "name": "Mark PUBLISHED",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.1,
+        "position": [
+          1780,
+          300
+        ],
+        "credentials": {
+          "googleDriveOAuth2Api": {
+            "id": "dwOT4VyMlmKAS9om",
+            "name": "Google Drive account"
+          }
+        }
+      },
+      {
+        "id": "ig-reel-create-001",
+        "name": "Create IG Reel Video",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          900,
+          520
+        ],
+        "parameters": {
+          "mode": "runOnceForEachItem",
+          "jsCode": "const { execSync } = require('child_process');\nconst fs = require('fs');\nconst path = require('path');\n\nconst ts = Date.now();\nconst imgBuf = await this.helpers.getBinaryDataBuffer($input.item, 'data');\nconst imgPath_n8n    = `/data/ffmpeg/input/qpc_reel_${ts}.jpg`;\nconst imgPath_ffmpeg = `/ffmpeg/input/qpc_reel_${ts}.jpg`;\nconst outPath_n8n    = `/data/ffmpeg/output/qpc_reel_${ts}.mp4`;\nconst outPath_ffmpeg = `/ffmpeg/output/qpc_reel_${ts}.mp4`;\n\nfs.writeFileSync(imgPath_n8n, imgBuf);\n\nconst bgmDir = '/ffmpeg/config/bgm_aperture';\nconst bgmRaw = execSync(\n  `docker exec qpc_ffmpeg_runner bash -c \"ls ${bgmDir}/*.mp3 2>/dev/null\"`,\n  { encoding: 'utf-8' }\n).trim();\nconst bgmList = bgmRaw.split('\\n').filter(Boolean);\nif (!bgmList.length) throw new Error('No BGM files found at ' + bgmDir);\nconst bgm = bgmList[Math.floor(Math.random() * bgmList.length)];\n\nconst scale = 'scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=black';\nconst ffCmd = `ffmpeg -y -loop 1 -i '${imgPath_ffmpeg}' -i '${bgm}' -c:v libx264 -t 20 -pix_fmt yuv420p -vf \"${scale}\" -c:a aac -b:a 128k -movflags +faststart '${outPath_ffmpeg}'`;\n\nexecSync(`docker exec qpc_ffmpeg_runner bash -c ${JSON.stringify(ffCmd)}`,\n  { timeout: 120000, encoding: 'utf-8' });\n\ntry { fs.unlinkSync(imgPath_n8n); } catch(e) {}\n\nreturn {\n  json: {\n    ...$input.item.json,\n    reelVideoPath: outPath_n8n,\n    reelJobId: ts,\n    bgmUsed: path.basename(bgm)\n  }\n};"
+        }
+      },
+      {
+        "id": "ig-reel-getuid-002",
+        "name": "Get IG User ID",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.1,
+        "position": [
+          1120,
+          520
+        ],
+        "parameters": {
+          "method": "GET",
+          "url": "=https://graph.facebook.com/v20.0/{{ $env.FB_PAGE_ID }}",
+          "sendQuery": true,
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "fields",
+                "value": "instagram_business_account"
+              },
+              {
+                "name": "access_token",
+                "value": "={{ $env.FB_PAGE_ACCESS_TOKEN }}"
+              }
+            ]
+          },
+          "options": {}
+        }
+      },
+      {
+        "id": "ig-reel-container-003",
+        "name": "Create IG Reel Container",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.1,
+        "position": [
+          1340,
+          520
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "={{ 'https://graph.facebook.com/v20.0/' + $json.instagram_business_account.id + '/media' }}",
+          "sendBody": true,
+          "contentType": "form-urlencoded",
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "media_type",
+                "value": "REELS"
+              },
+              {
+                "name": "upload_type",
+                "value": "resumable"
+              },
+              {
+                "name": "caption",
+                "value": "={{ $('Create IG Reel Video').item.json.instagram_caption }}"
+              },
+              {
+                "name": "share_to_feed",
+                "value": "true"
+              },
+              {
+                "name": "access_token",
+                "value": "={{ $env.FB_PAGE_ACCESS_TOKEN }}"
+              }
+            ]
+          },
+          "options": {}
+        }
+      },
+      {
+        "id": "ig-reel-upload-004",
+        "name": "Upload Reel Video",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1560,
+          520
+        ],
+        "parameters": {
+          "mode": "runOnceForEachItem",
+          "jsCode": "const fs    = require('fs');\nconst https = require('https');\n\nconst reelPath  = $('Create IG Reel Video').item.json.reelVideoPath;\nconst uploadUri = $('Create IG Reel Container').item.json.uri;\nconst token     = $env.FB_PAGE_ACCESS_TOKEN;\n\nif (!fs.existsSync(reelPath)) throw new Error('Reel video not found: ' + reelPath);\nconst videoBuf = fs.readFileSync(reelPath);\nconst fileSize  = videoBuf.length;\nconst url = new URL(uploadUri);\n\nconst result = await new Promise((resolve, reject) => {\n  const req = https.request({\n    hostname: url.hostname,\n    path:     url.pathname + url.search,\n    method:   'POST',\n    headers: {\n      'Authorization':  `OAuth ${token}`,\n      'offset':         '0',\n      'file_size':      String(fileSize),\n      'Content-Type':   'video/mp4',\n      'Content-Length': fileSize\n    }\n  }, res => {\n    let d = '';\n    res.on('data', c => d += c);\n    res.on('end', () => resolve({ statusCode: res.statusCode, body: d }));\n  });\n  req.on('error', reject);\n  req.write(videoBuf);\n  req.end();\n});\n\ntry { fs.unlinkSync(reelPath); } catch(e) {}\nif (result.statusCode >= 300) throw new Error(`Upload failed ${result.statusCode}: ${result.body}`);\n\nreturn {\n  json: {\n    ig_user_id:    $('Get IG User ID').item.json.instagram_business_account.id,\n    creation_id:   $('Create IG Reel Container').item.json.id,\n    upload_status: result.body\n  }\n};"
+        }
+      },
+      {
+        "id": "ig-reel-sleep-005",
+        "name": "Wait IG Processing",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1780,
+          520
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "jsCode": "await new Promise(r => setTimeout(r, 45000));\nreturn $input.all();"
+        }
+      },
+      {
+        "id": "ig-reel-publish-006",
+        "name": "Publish IG Reel",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.1,
+        "position": [
+          2000,
+          520
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "={{ 'https://graph.facebook.com/v20.0/' + $json.ig_user_id + '/media_publish' }}",
+          "sendBody": true,
+          "contentType": "form-urlencoded",
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "creation_id",
+                "value": "={{ $json.creation_id }}"
+              },
+              {
+                "name": "access_token",
+                "value": "={{ $env.FB_PAGE_ACCESS_TOKEN }}"
+              }
+            ]
+          },
+          "options": {}
+        }
+      }
+    ],
+    "connections": {
+      "Webhook Trigger": {
+        "main": [
+          [
+            {
+              "node": "Parse Webhook Body",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Manual Test Trigger": {
+        "main": [
+          [
+            {
+              "node": "Test Payload",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Test Payload": {
+        "main": [
+          [
+            {
+              "node": "Parse Webhook Body",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Parse Webhook Body": {
+        "main": [
+          [
+            {
+              "node": "Clean Captions",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Clean Captions": {
+        "main": [
+          [
+            {
+              "node": "Download Image from Drive",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Make: Multi-Platform Post",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Download Image from Drive": {
+        "main": [
+          [
+            {
+              "node": "Prepare Image Data",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Prepare Image Data": {
+        "main": [
+          [
+            {
+              "node": "Post to Facebook",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Make: LinkedIn Post",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Create IG Reel Video",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Make: LinkedIn Post": {
+        "main": [
+          [
+            {
+              "node": "Respond to Webhook",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Check Has Row",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Post to Facebook": {
+        "main": [
+          [
+            {
+              "node": "Respond to Webhook",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Check Has Row",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Publish Schedule Trigger": {
+        "main": [
+          [
+            {
+              "node": "Read Queue Rows",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Read Queue Rows": {
+        "main": [
+          [
+            {
+              "node": "Find First READY Row",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Find First READY Row": {
+        "main": [
+          [
+            {
+              "node": "Clean Captions",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Mark PUBLISHING",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Check Has Row": {
+        "main": [
+          [
+            {
+              "node": "IF Has Row Index?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "IF Has Row Index?": {
+        "main": [
+          [
+            {
+              "node": "Mark PUBLISHED",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          []
+        ]
+      },
+      "Create IG Reel Video": {
+        "main": [
+          [
+            {
+              "node": "Get IG User ID",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Get IG User ID": {
+        "main": [
+          [
+            {
+              "node": "Create IG Reel Container",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Create IG Reel Container": {
+        "main": [
+          [
+            {
+              "node": "Upload Reel Video",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Upload Reel Video": {
+        "main": [
+          [
+            {
+              "node": "Wait IG Processing",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Wait IG Processing": {
+        "main": [
+          [
+            {
+              "node": "Publish IG Reel",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Publish IG Reel": {
+        "main": [
+          [
+            {
+              "node": "Check Has Row",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "authors": "Sandesh Neupane",
+    "name": null,
+    "description": null,
+    "autosaved": false
+  }
 }
