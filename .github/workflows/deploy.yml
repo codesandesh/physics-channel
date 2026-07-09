@@ -21,12 +21,12 @@ jobs:
             DEPLOY_DIR="/root/quantum-physics-channel"
 
             # Clone on first deploy, pull on subsequent
-            # Uses deploy key at ~/.ssh/physics_deploy (added to repo as read-only Deploy Key)
+            # Uses fine-grained PAT scoped to this repo only (GH_DEPLOY_TOKEN secret)
             if [ ! -d "$DEPLOY_DIR/.git" ]; then
-              git clone git@github-physics:scale-build-ai/quantum-physics-channel.git "$DEPLOY_DIR"
+              git clone https://oauth2:${{ secrets.GH_DEPLOY_TOKEN }}@github.com/scale-build-ai/quantum-physics-channel.git "$DEPLOY_DIR"
             else
               cd "$DEPLOY_DIR"
-              git pull origin main
+              git -C "$DEPLOY_DIR" pull origin main
             fi
 
             cd "$DEPLOY_DIR"
