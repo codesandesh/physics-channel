@@ -21,11 +21,13 @@ jobs:
             DEPLOY_DIR="/home/physics-deploy/quantum-physics-channel"
 
             # Clone on first deploy, pull on subsequent
-            # Uses fine-grained PAT scoped to this repo only (GH_DEPLOY_TOKEN secret)
+            # If dir exists but has no .git, remove and re-clone (preserves .env via backup)
             if [ ! -d "$DEPLOY_DIR/.git" ]; then
+              [ -f "$DEPLOY_DIR/.env" ] && cp "$DEPLOY_DIR/.env" /home/physics-deploy/.env.backup
+              rm -rf "$DEPLOY_DIR"
               git clone https://oauth2:${{ secrets.GH_DEPLOY_TOKEN }}@github.com/scale-build-ai/quantum-physics-channel.git "$DEPLOY_DIR"
+              [ -f /home/physics-deploy/.env.backup ] && cp /home/physics-deploy/.env.backup "$DEPLOY_DIR/.env"
             else
-              cd "$DEPLOY_DIR"
               git -C "$DEPLOY_DIR" pull origin main
             fi
 
