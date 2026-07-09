@@ -43,7 +43,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const raw = $input.first().json;\nconst body = (raw.body !== undefined) ? raw.body : raw;\nif (!body.job_id) throw new Error('Payload missing: job_id');\nif (!Array.isArray(body.clip_prompts) || body.clip_prompts.length < 1) throw new Error('Payload must have clip_prompts array');\nreturn [{ json: {\n  job_id: body.job_id,\n  topic: body.topic,\n  title: body.title,\n  hashtags: body.hashtags,\n  narration: body.narration,\n  clip_prompts: body.clip_prompts,\n  audio_path: body.audio_path,\n  subs_path: body.subs_path,\n  audio_duration: body.audio_duration,\n  subtitle_chunks: body.subtitle_chunks,\n  word_timings: body.word_timings,\n  sheet_row: body.sheet_row || null,\n  start_time: body.start_time || Date.now(),\n  bgm_path: body.bgm_path || null,\n  negative_prompts: body.negative_prompts || [],\n  highlight_keywords: body.highlight_keywords || [],\n  scenes: body.scenes || []\n} }];"
+        "jsCode": "const raw = $input.first().json;\nconst body = (raw.body !== undefined) ? raw.body : raw;\nif (!body.job_id) throw new Error('Payload missing: job_id');\n// clip_prompts optional — clips picked from library now\nreturn [{ json: {\n  job_id: body.job_id,\n  topic: body.topic,\n  title: body.title,\n  hashtags: body.hashtags,\n  narration: body.narration,\n  clip_prompts: body.clip_prompts,\n  audio_path: body.audio_path,\n  subs_path: body.subs_path,\n  audio_duration: body.audio_duration,\n  subtitle_chunks: body.subtitle_chunks,\n  word_timings: body.word_timings,\n  sheet_row: body.sheet_row || null,\n  queue_row_index: body.queue_row_index || null,\n  start_time: body.start_time || Date.now(),\n  bgm_path: body.bgm_path || null,\n  negative_prompts: body.negative_prompts || [],\n  highlight_keywords: body.highlight_keywords || [],\n  scenes: body.scenes || []\n} }];"
       },
       "id": "node2",
       "name": "Extract Payload",
@@ -57,7 +57,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const { execSync } = require('child_process');\nconst fs = require('fs');\n\nconst items = $input.all().map(item => item.json);\n\nconst n8nIn  = '/data/ffmpeg/input';\nconst n8nOut = '/data/ffmpeg/output';\nconst contIn = '/ffmpeg/input';\nconst contOut= '/ffmpeg/output';\n\nif (!fs.existsSync(n8nIn))  fs.mkdirSync(n8nIn,  { recursive: true });\nif (!fs.existsSync(n8nOut)) fs.mkdirSync(n8nOut, { recursive: true });\n\nfunction run(cmd, timeoutMs) {\n  const t = timeoutMs || 120000;\n  console.log('CMD: ' + cmd.slice(0, 200));\n  let out = '';\n  try { out = execSync(cmd, { encoding: 'utf-8', timeout: t }); }\n  catch(e) { out = (e.stdout || '') + (e.stderr || ''); }\n  return out.toString();\n}\n\nfunction assembleOne(data) {\n  const jobId = data.job_id;\n  const videoPaths = data.video_paths;\n  const N = videoPaths.length;\n  if (N < 2) throw new Error('Job ' + jobId + ': need at least 2 clips for assembly, got ' + N);\n  for (let i = 0; i < N; i++) {\n    const diskPath = videoPaths[i].replace('/ffmpeg/input', '/data/ffmpeg/input');\n    if (!fs.existsSync(diskPath)) throw new Error('Job ' + jobId + ': clip ' + i + ' missing before assembly: ' + videoPaths[i]);\n  }\n\n  for (let i = 0; i < N; i++) {\n    run('docker exec qpc_ffmpeg_runner ffmpeg -y -i \"' + videoPaths[i] + '\" -vf \"scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black\" -r 24 -c:v libx264 -crf 20 -preset fast -pix_fmt yuv420p -an \"' + contIn + '/' + jobId + '_clip' + i + '_norm.mp4\"', 120000);\n  }\n\n  let withTransitions;\n  if (N === 1) {\n    withTransitions = contIn + '/' + jobId + '_clip0_norm.mp4';\n  } else {\n    const inputs = Array.from({length:N}, (_,i) => '-i \"' + contIn + '/' + jobId + '_clip' + i + '_norm.mp4\"').join(' ');\n    let xf = '';\n    let prev = '[0:v]';\n    for (let i = 1; i < N; i++) {\n      const o = (i === N-1) ? '[vout]' : '[x'+i+']';\n      xf += prev + '['+i+':v]xfade=transition=fade:duration=0.3:offset=' + (i*4.7).toFixed(1) + o + ';';\n      prev = o;\n    }\n    run('docker exec qpc_ffmpeg_runner ffmpeg -y ' + inputs + ' -filter_complex \"' + xf.slice(0,-1) + '\" -map \"[vout]\" -c:v libx264 -crf 20 -preset fast -pix_fmt yuv420p \"' + contIn + '/' + jobId + '_xfade.mp4\"', 300000);\n    withTransitions = contIn + '/' + jobId + '_xfade.mp4';\n  }\n\n  const hlWords = (data.highlight_keywords || []).map(w => w.toLowerCase());\n  function esc(s) { return s.replace(/[.+?^${}()|[\\]\\\\*]/g, '\\\\$&'); }\n  function addHighlights(text) {\n    let r = text;\n    hlWords.forEach(word => {\n      const re = new RegExp('(' + esc(word) + ')', 'gi');\n      var _bs = String.fromCharCode(92); r = r.replace(re, '{' + _bs + 'c&HFF9600&}$1{' + _bs + 'c&HFFFFFF&}');\n    });\n    return r;\n  }\n  const narTxt = (data.narration || '').replace(/_/g, ' ').replace(/\\s*-\\s*/g, ' ').replace(/\"/g, \"'\").replace(/\\n/g, ' ').replace(/\\s+/g, ' ').trim();\n  const hlText = addHighlights(narTxt);\n  const totalDur = data.audio_duration || (N * 4.7);\n  function secToAss(s) {\n    const h = Math.floor(s / 3600);\n    const m = Math.floor((s % 3600) / 60);\n    const sec = Math.floor(s % 60);\n    const cs = Math.round((s % 1) * 100);\n    return h + ':' + String(m).padStart(2,'0') + ':' + String(sec).padStart(2,'0') + '.' + String(cs).padStart(2,'0');\n  }\n\n  const assContent =\n    '[Script Info]\\nScriptType: v4.00+\\nPlayResX: 1080\\nPlayResY: 1920\\n\\n' +\n    '[V4+ Styles]\\n' +\n    'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\\n' +\n    'Style: Caption,Liberation Sans,52,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,1,3,0,7,60,60,470,1\\n\\n' +\n    '[Events]\\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\\n' +\n    'Dialogue: 0,0:00:00.00,' + secToAss(totalDur) + ',Caption,,0,0,0,,' + hlText + '\\n';\n\n  fs.writeFileSync(n8nIn + '/' + jobId + '.ass', assContent, 'utf8');\n  console.log('Job ' + jobId + ': ASS written. Highlights: ' + hlWords.join(', '));\n\n  const logoPath = '/ffmpeg/config/icon/logo.png';\n  const tickPath = '/ffmpeg/config/icon/Blue verification badge emblem.png';\n  const bgmDir   = '/ffmpeg/config/bgm';\n\n  const hasLogo = run('docker exec qpc_ffmpeg_runner test -f \"' + logoPath + '\" && echo OK').includes('OK');\n  const hasTick = run('docker exec qpc_ffmpeg_runner test -f \"' + tickPath + '\" && echo OK').includes('OK');\n\n  let narFile = null;\n  if (data.audio_path) {\n    narFile = data.audio_path.replace('/data/ffmpeg', '/ffmpeg');\n    if (!run('docker exec qpc_ffmpeg_runner test -f \"' + narFile + '\" && echo OK').includes('OK')) {\n      console.log('Job ' + jobId + ': narration not found: ' + narFile);\n      narFile = null;\n    }\n  }\n\n  let bgmFile = data.bgm_path ? data.bgm_path.replace('/data/ffmpeg', '/ffmpeg') : null;\n  if (!bgmFile) {\n    const ls = run('docker exec qpc_ffmpeg_runner ls \"' + bgmDir + '\" 2>/dev/null').split('\\n');\n    const mp3 = ls.find(f => f.trim().endsWith('.mp3'));\n    if (mp3) bgmFile = bgmDir + '/' + mp3.trim();\n  }\n  const hasBgm = !!(bgmFile && run('docker exec qpc_ffmpeg_runner test -f \"' + bgmFile + '\" && echo OK').includes('OK'));\n  console.log('Job ' + jobId + ': narFile=' + narFile + ' hasBgm=' + hasBgm);\n\n  const inp   = ['-i \"' + withTransitions + '\"'];\n  const logoI = hasLogo ? inp.push('-i \"' + logoPath + '\"') - 1 : -1;\n  const tickI = hasTick ? inp.push('-i \"' + tickPath + '\"') - 1 : -1;\n  const narI  = narFile  ? inp.push('-i \"' + narFile  + '\"') - 1 : -1;\n  const bgmI  = hasBgm   ? inp.push('-i \"' + bgmFile  + '\"') - 1 : -1;\n\n  let lbl = 0;\n  let vf  = '';\n  let cur = '0:v';\n\n  if (hasLogo) {\n    vf += '[' + logoI + ':v]scale=110:110,format=rgba[lg];[' + cur + '][lg]overlay=x=40:y=293:format=auto[vb' + lbl + ']';\n    cur = 'vb' + lbl; lbl++;\n  }\n\n  vf += (vf ? ';' : '') + '[' + cur + \"]drawtext=text='SchrodingersCat':fontcolor=white:fontsize=52:x=178:y=308:bordercolor=black:borderw=3[vb\" + lbl + ']';\n  cur = 'vb' + lbl; lbl++;\n\n  if (hasTick) {\n    vf += ';[' + tickI + \":v]crop='min(iw,ih)':'min(iw,ih)',scale=72:72,format=rgba[tk];[\" + cur + '][tk]overlay=x=600:y=300:format=auto[vb' + lbl + ']';\n    cur = 'vb' + lbl; lbl++;\n  }\n\n  vf += ';[' + cur + \"]drawtext=text='@SchrodingersCat':fontcolor=white:fontsize=34:x=178:y=377:bordercolor=black:borderw=2[vb\" + lbl + ']';\n  cur = 'vb' + lbl; lbl++;\n\n  vf += \";[\" + cur + \"]subtitles=filename='\" + contIn + '/' + jobId + \".ass'[outv]\";\n\n  let afilters = '';\n  let amap     = '-an';\n\n  if (narFile && hasBgm) {\n    afilters = ';[' + narI + ':a]volume=1.0[nar];[' + bgmI + ':a]volume=0.25[bgm];[nar][bgm]amix=inputs=2:duration=first:dropout_transition=2[aout]';\n    amap     = '-map \"[aout]\"';\n  } else if (narFile) {\n    afilters = ';[' + narI + ':a]aformat=sample_fmts=fltp[aout]';\n    amap     = '-map \"[aout]\"';\n  } else if (hasBgm) {\n    afilters = ';[' + bgmI + ':a]volume=0.85[aout]';\n    amap     = '-map \"[aout]\"';\n  }\n\n  const fullFilter = vf + afilters;\n  const dur = data.audio_duration ? Math.ceil(data.audio_duration) + 2 : 30;\n  const hasAudio = amap !== '-an';\n\n  const cmd =\n    'docker exec qpc_ffmpeg_runner ffmpeg -y ' + inp.join(' ') +\n    ' -filter_complex \"' + fullFilter + '\" -map \"[outv]\" ' + amap +\n    ' -c:v libx264 -crf 18 -preset fast -pix_fmt yuv420p -movflags +faststart' +\n    (hasAudio ? ' -c:a aac -b:a 192k' : '') +\n    ' -t ' + dur + ' \"' + contOut + '/' + jobId + '_final.mp4\" && echo FINAL_OK';\n\n  const result = run(cmd, 900000);\n  if (!result.includes('FINAL_OK')) throw new Error('Job ' + jobId + ': final render failed: ' + result.slice(-800));\n\n  const finalPath = n8nOut + '/' + jobId + '_final.mp4';\n  if (!fs.existsSync(finalPath)) throw new Error('Job ' + jobId + ': output missing: ' + finalPath);\n\n  return Object.assign({}, data, { final_video_path: finalPath, output_filename: jobId + '_final.mp4' });\n}\n\nconsole.log('Assembling ' + items.length + ' video(s)...');\nconst results = items.map(assembleOne);\nreturn results.map(r => ({ json: r }));\n"
+        "jsCode": "const { execSync } = require('child_process');\nconst fs = require('fs');\n\nconst items = $input.all().map(item => item.json);\n\nconst n8nIn  = '/data/ffmpeg/input';\nconst n8nOut = '/data/ffmpeg/output';\nconst contIn = '/ffmpeg/input';\nconst contOut= '/ffmpeg/output';\n\nif (!fs.existsSync(n8nIn))  fs.mkdirSync(n8nIn,  { recursive: true });\nif (!fs.existsSync(n8nOut)) fs.mkdirSync(n8nOut, { recursive: true });\n\nfunction run(cmd, timeoutMs) {\n  const t = timeoutMs || 120000;\n  console.log('CMD: ' + cmd.slice(0, 200));\n  let out = '';\n  try { out = execSync(cmd, { encoding: 'utf-8', timeout: t }); }\n  catch(e) { out = (e.stdout || '') + (e.stderr || ''); }\n  return out.toString();\n}\n\nfunction toDiskPath(contPath) {\n  return contPath\n    .replace('/ffmpeg/input', '/data/ffmpeg/input')\n    .replace('/ffmpeg/clips', '/data/ffmpeg/clips');\n}\n\nfunction assembleOne(data) {\n  const jobId = data.job_id;\n  const videoPaths = data.video_paths;\n  const N = videoPaths.length;\n  const clipDurations = data.clip_durations || Array(N).fill(5.0);\n  const TRANS = 0.3;\n\n  if (N < 2) throw new Error('Job ' + jobId + ': need at least 2 clips, got ' + N);\n\n  for (let i = 0; i < N; i++) {\n    const diskPath = toDiskPath(videoPaths[i]);\n    if (!fs.existsSync(diskPath)) throw new Error('Job ' + jobId + ': clip ' + i + ' missing: ' + videoPaths[i]);\n  }\n\n  // Normalize each clip to 1080x1920 @ 24fps\n  for (let i = 0; i < N; i++) {\n    run('docker exec qpc_ffmpeg_runner ffmpeg -y -i \"' + videoPaths[i] + '\" -vf \"scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black\" -r 24 -c:v libx264 -crf 20 -preset fast -pix_fmt yuv420p -an \"' + contIn + '/' + jobId + '_clip' + i + '_norm.mp4\"', 120000);\n  }\n\n  // Xfade assembly with dynamic offsets from actual clip durations\n  let withTransitions;\n  if (N === 1) {\n    withTransitions = contIn + '/' + jobId + '_clip0_norm.mp4';\n  } else {\n    const inputs = Array.from({length:N}, (_,i) => '-i \"' + contIn + '/' + jobId + '_clip' + i + '_norm.mp4\"').join(' ');\n    let xf = '';\n    let prev = '[0:v]';\n    let offset = 0;\n    for (let i = 1; i < N; i++) {\n      const o = (i === N-1) ? '[vout]' : '[x'+i+']';\n      offset += clipDurations[i-1] - TRANS;\n      xf += prev + '['+i+':v]xfade=transition=fade:duration=' + TRANS + ':offset=' + offset.toFixed(3) + o + ';';\n      prev = o;\n    }\n    run('docker exec qpc_ffmpeg_runner ffmpeg -y ' + inputs + ' -filter_complex \"' + xf.slice(0,-1) + '\" -map \"[vout]\" -c:v libx264 -crf 20 -preset fast -pix_fmt yuv420p \"' + contIn + '/' + jobId + '_xfade.mp4\"', 300000);\n    withTransitions = contIn + '/' + jobId + '_xfade.mp4';\n  }\n\n  const hlWords = (data.highlight_keywords || []).map(w => w.toLowerCase());\n  function esc(s) { return s.replace(/[.+?^${}()|[\\]\\\\*]/g, '\\\\$&'); }\n  function addHighlights(text) {\n    let r = text;\n    hlWords.forEach(word => {\n      const re = new RegExp('(' + esc(word) + ')', 'gi');\n      var _bs = String.fromCharCode(92); r = r.replace(re, '{' + _bs + 'c&HFF9600&}$1{' + _bs + 'c&HFFFFFF&}');\n    });\n    return r;\n  }\n  const narTxt = (data.narration || '').replace(/_/g, ' ').replace(/\\s*-\\s*/g, ' ').replace(/\"/g, \"'\").replace(/\\n/g, ' ').replace(/\\s+/g, ' ').trim();\n  const hlText = addHighlights(narTxt);\n  const totalDur = data.audio_duration || clipDurations.reduce((a,d,i) => a + (i===0 ? d : d - TRANS), 0);\n  function secToAss(s) {\n    const h = Math.floor(s / 3600);\n    const m = Math.floor((s % 3600) / 60);\n    const sec = Math.floor(s % 60);\n    const cs = Math.round((s % 1) * 100);\n    return h + ':' + String(m).padStart(2,'0') + ':' + String(sec).padStart(2,'0') + '.' + String(cs).padStart(2,'0');\n  }\n\n  const assContent =\n    '[Script Info]\\nScriptType: v4.00+\\nPlayResX: 1080\\nPlayResY: 1920\\n\\n' +\n    '[V4+ Styles]\\n' +\n    'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\\n' +\n    'Style: Caption,Liberation Sans,52,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,1,3,0,7,60,60,470,1\\n\\n' +\n    '[Events]\\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\\n' +\n    'Dialogue: 0,0:00:00.00,' + secToAss(totalDur) + ',Caption,,0,0,0,,' + hlText + '\\n';\n\n  fs.writeFileSync(n8nIn + '/' + jobId + '.ass', assContent, 'utf8');\n  console.log('Job ' + jobId + ': ASS written. Highlights: ' + hlWords.join(', '));\n\n  const logoPath = '/ffmpeg/config/icon/logo.png';\n  const tickPath = '/ffmpeg/config/icon/Blue verification badge emblem.png';\n  const bgmDir   = '/ffmpeg/config/bgm';\n\n  const hasLogo = run('docker exec qpc_ffmpeg_runner test -f \"' + logoPath + '\" && echo OK').includes('OK');\n  const hasTick = run('docker exec qpc_ffmpeg_runner test -f \"' + tickPath + '\" && echo OK').includes('OK');\n\n  let narFile = null;\n  if (data.audio_path) {\n    narFile = data.audio_path.replace('/data/ffmpeg', '/ffmpeg');\n    if (!run('docker exec qpc_ffmpeg_runner test -f \"' + narFile + '\" && echo OK').includes('OK')) {\n      console.log('Job ' + jobId + ': narration not found: ' + narFile);\n      narFile = null;\n    }\n  }\n\n  let bgmFile = data.bgm_path ? data.bgm_path.replace('/data/ffmpeg', '/ffmpeg') : null;\n  if (!bgmFile) {\n    const ls = run('docker exec qpc_ffmpeg_runner ls \"' + bgmDir + '\" 2>/dev/null').split('\\n');\n    const mp3 = ls.find(f => f.trim().endsWith('.mp3'));\n    if (mp3) bgmFile = bgmDir + '/' + mp3.trim();\n  }\n  const hasBgm = !!(bgmFile && run('docker exec qpc_ffmpeg_runner test -f \"' + bgmFile + '\" && echo OK').includes('OK'));\n  console.log('Job ' + jobId + ': narFile=' + narFile + ' hasBgm=' + hasBgm);\n\n  const inp   = ['-i \"' + withTransitions + '\"'];\n  const logoI = hasLogo ? inp.push('-i \"' + logoPath + '\"') - 1 : -1;\n  const tickI = hasTick ? inp.push('-i \"' + tickPath + '\"') - 1 : -1;\n  const narI  = narFile  ? inp.push('-i \"' + narFile  + '\"') - 1 : -1;\n  const bgmI  = hasBgm   ? inp.push('-i \"' + bgmFile  + '\"') - 1 : -1;\n\n  let lbl = 0;\n  let vf  = '';\n  let cur = '0:v';\n\n  if (hasLogo) {\n    vf += '[' + logoI + ':v]scale=110:110,format=rgba[lg];[' + cur + '][lg]overlay=x=40:y=293:format=auto[vb' + lbl + ']';\n    cur = 'vb' + lbl; lbl++;\n  }\n\n  vf += (vf ? ';' : '') + '[' + cur + \"]drawtext=text='SchrodingersCat':fontcolor=white:fontsize=52:x=178:y=308:bordercolor=black:borderw=3[vb\" + lbl + ']';\n  cur = 'vb' + lbl; lbl++;\n\n  if (hasTick) {\n    vf += ';[' + tickI + \":v]crop='min(iw,ih)':'min(iw,ih)',scale=72:72,format=rgba[tk];[\" + cur + '][tk]overlay=x=600:y=300:format=auto[vb' + lbl + ']';\n    cur = 'vb' + lbl; lbl++;\n  }\n\n  vf += ';[' + cur + \"]drawtext=text='@SchrodingersCat':fontcolor=white:fontsize=34:x=178:y=377:bordercolor=black:borderw=2[vb\" + lbl + ']';\n  cur = 'vb' + lbl; lbl++;\n\n  vf += \";[\" + cur + \"]subtitles=filename='\" + contIn + '/' + jobId + \".ass'[outv]\";\n\n  let afilters = '';\n  let amap     = '-an';\n\n  if (narFile && hasBgm) {\n    afilters = ';[' + narI + ':a]volume=1.0[nar];[' + bgmI + ':a]volume=0.25[bgm];[nar][bgm]amix=inputs=2:duration=first:dropout_transition=2[aout]';\n    amap     = '-map \"[aout]\"';\n  } else if (narFile) {\n    afilters = ';[' + narI + ':a]aformat=sample_fmts=fltp[aout]';\n    amap     = '-map \"[aout]\"';\n  } else if (hasBgm) {\n    afilters = ';[' + bgmI + ':a]volume=0.85[aout]';\n    amap     = '-map \"[aout]\"';\n  }\n\n  const fullFilter = vf + afilters;\n  const dur = data.audio_duration ? Math.ceil(data.audio_duration) + 2 : 30;\n  const hasAudio = amap !== '-an';\n\n  const cmd =\n    'docker exec qpc_ffmpeg_runner ffmpeg -y ' + inp.join(' ') +\n    ' -filter_complex \"' + fullFilter + '\" -map \"[outv]\" ' + amap +\n    ' -c:v libx264 -crf 18 -preset fast -pix_fmt yuv420p -movflags +faststart' +\n    (hasAudio ? ' -c:a aac -b:a 192k' : '') +\n    ' -t ' + dur + ' \"' + contOut + '/' + jobId + '_final.mp4\" && echo FINAL_OK';\n\n  const result = run(cmd, 900000);\n  if (!result.includes('FINAL_OK')) throw new Error('Job ' + jobId + ': final render failed: ' + result.slice(-800));\n\n  const finalPath = n8nOut + '/' + jobId + '_final.mp4';\n  if (!fs.existsSync(finalPath)) throw new Error('Job ' + jobId + ': output missing: ' + finalPath);\n\n  return Object.assign({}, data, { final_video_path: finalPath, output_filename: jobId + '_final.mp4' });\n}\n\nconsole.log('Assembling ' + items.length + ' video(s)...');\nconst results = items.map(assembleOne);\nreturn results.map(r => ({ json: r }));"
       },
       "id": "Assemble Video",
       "name": "Assemble Video",
@@ -154,7 +154,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const permResults = $input.all();\nconst assembleResults = $('Assemble Video').all();\nconst uploadResults = $('Upload Animation to Drive').all();\n\nreturn permResults.map((_, i) => {\n  const assemble = assembleResults[i].json;\n  const upload = uploadResults[i].json;\n  const fileId = upload.id;\n  const videoUrl = 'https://drive.usercontent.google.com/download?id=' + fileId + '&export=download';\n  const renderTimeSec = Math.round((Date.now() - assemble.start_time) / 1000);\n  console.log('Stage 2 complete. Job: ' + assemble.job_id + ', Drive file: ' + fileId + ', Time: ' + renderTimeSec + 's');\n  return { json: {\n    job_id: assemble.job_id,\n    topic: assemble.topic,\n    title: assemble.title,\n    narration: assemble.narration,\n    hashtags: assemble.hashtags,\n    final_video_path: assemble.final_video_path,\n    output_filename: assemble.output_filename,\n    video_url: videoUrl,\n    drive_file_id: fileId,\n    render_time_seconds: renderTimeSec,\n    sheet_row: assemble.sheet_row,\n    rowIndex: assemble.rowIndex,\n    readyForVideoAt: assemble.readyForVideoAt,\n    status: 'stage2_complete'\n  }};\n});\n"
+        "jsCode": "const permResults    = $input.all();\nconst assembleResults = $('Assemble Video').all();\nconst uploadResults  = $('Upload Animation to Drive').all();\n\nreturn permResults.map((_, i) => {\n  const assemble = assembleResults[i].json;\n  const upload   = uploadResults[i].json;\n  const fileId   = upload.id;\n  const videoUrl = 'https://drive.usercontent.google.com/download?id=' + fileId + '&export=download';\n  const renderTimeSec = Math.round((Date.now() - assemble.start_time) / 1000);\n  console.log('Stage 2 complete. Job: ' + assemble.job_id + ', Drive: ' + fileId + ', Time: ' + renderTimeSec + 's');\n  return { json: {\n    job_id:             assemble.job_id,\n    topic:              assemble.topic,\n    title:              assemble.title,\n    narration:          assemble.narration,\n    hashtags:           assemble.hashtags,\n    highlight_keywords: assemble.highlight_keywords || [],\n    final_video_path:   assemble.final_video_path,\n    output_filename:    assemble.output_filename,\n    video_url:          videoUrl,\n    drive_file_id:      fileId,\n    render_time_seconds:renderTimeSec,\n    sheet_row:          assemble.sheet_row,\n    queue_row_index:    assemble.queue_row_index,\n    readyForVideoAt:    assemble.readyForVideoAt,\n    status: 'stage2_complete'\n  }};\n});"
       },
       "id": "node8",
       "name": "Stage 2 Done",
@@ -168,9 +168,9 @@
     {
       "parameters": {
         "method": "PUT",
-        "url": "={{ 'https://sheets.googleapis.com/v4/spreadsheets/1VD-F6Wj47Dm_5Uo_zdIEuxOnqprepCPRTKEmTYs6mFs/values/Content%20Master%20Table!L' + $json.sheet_row }}",
+        "url": "={{ 'https://sheets.googleapis.com/v4/spreadsheets/1VD-F6Wj47Dm_5Uo_zdIEuxOnqprepCPRTKEmTYs6mFs/values/Content%20Master%20Table!L' + $json.sheet_row + '?valueInputOption=RAW' }}",
         "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "googleDriveOAuth2Api",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ majorDimension: \"ROWS\", values: [[\"STAGE2_COMPLETE\"]] }) }}",
@@ -187,16 +187,16 @@
         304
       ],
       "credentials": {
-        "googleDriveOAuth2Api": {
-          "id": "dwOT4VyMlmKAS9om",
-          "name": "Google Drive account (new)"
+        "googleSheetsOAuth2Api": {
+          "id": "wUDvDA62yzWuxKP9",
+          "name": "Google Sheets account (new)"
         }
       },
       "continueOnFail": true
     },
     {
       "parameters": {
-        "jsCode": "const stage2Results = $('Stage 2 Done').all();\nreturn stage2Results.map(item => {\n  const d = item.json;\n  return { json: {\n    job_id:           d.job_id,\n    title:            d.title,\n    topic:            d.topic,\n    narration:        d.narration || '',\n    description:      (d.narration || d.topic).slice(0, 500),\n    hashtags:         d.hashtags || '',\n    final_video_path: d.final_video_path,\n    output_filename:  d.output_filename,\n    drive_file_id:    d.drive_file_id,\n    drive_video_url:  d.video_url,\n    sheet_row:        d.sheet_row,\n    rowIndex:         d.rowIndex,\n    readyForVideoAt:  d.readyForVideoAt,\n    callback_url:     null\n  }};\n});\n"
+        "jsCode": "const stage2Results = $('Stage 2 Done').all();\nreturn stage2Results.map(item => {\n  const d = item.json;\n  return { json: {\n    job_id:           d.job_id,\n    title:            d.title,\n    topic:            d.topic,\n    narration:        d.narration || '',\n    description:      ((d.narration || d.topic) || '').slice(0, 500),\n    hashtags:         d.hashtags || '',\n    highlight_keywords: d.highlight_keywords || [],\n    final_video_path: d.final_video_path,\n    output_filename:  d.output_filename,\n    drive_file_id:    d.drive_file_id,\n    drive_video_url:  d.video_url,\n    sheet_row:        d.sheet_row,\n    queue_row_index:  d.queue_row_index,\n    readyForVideoAt:  d.readyForVideoAt,\n    callback_url:     null\n  }};\n});"
       },
       "id": "node10",
       "name": "Build Stage 3 Payload",
@@ -209,230 +209,16 @@
     },
     {
       "parameters": {
-        "jsCode": "const fs = require('fs');\nlet jobs;\ntry { jobs = $('Find Next Ready Job').all().map(item => item.json); }\ncatch (e) { jobs = $input.all().map(item => item.json); }\n\nconst url = $env.VASTAI_VIDEO_URL || \"http://175.155.64.189:19486/generate\";\nconst apiKey = $env.VASTAI_VIDEO_API_KEY;\n\nconst n8nIn = '/data/ffmpeg/input';\nif (!fs.existsSync(n8nIn)) fs.mkdirSync(n8nIn, { recursive: true });\n\nconst WORKERS = ['gpu0', 'gpu1', 'gpu2', 'gpu3'];\n\nconst generateClip = async (jobId, prompt, negPrompt, index, worker) => {\n  const body = { prompt, negative_prompt: negPrompt || null, width: 720, height: 1280, length: 80, worker: worker };\n  let result, lastErr;\n  for (let attempt = 1; attempt <= 2; attempt++) {\n    try {\n      console.log('Job ' + jobId + ' clip ' + index + ' -> ' + worker + ', attempt ' + attempt + '...');\n      result = await this.helpers.httpRequest({\n        method: 'POST',\n        url,\n        headers: { 'X-Api-Key': apiKey, 'Content-Type': 'application/json' },\n        body,\n        json: true,\n        timeout: 1500000\n      });\n      break;\n    } catch (e) {\n      lastErr = e;\n      if (attempt < 2) await new Promise(r => setTimeout(r, 10000));\n    }\n  }\n  if (!result) throw new Error('Job ' + jobId + ' clip ' + index + ' (' + worker + ') failed: ' + (lastErr && lastErr.message || 'unknown'));\n  if (!result.video_base64) throw new Error('Job ' + jobId + ' clip ' + index + ' missing video_base64');\n  const path = n8nIn + '/' + jobId + '_clip' + index + '.webm';\n  fs.writeFileSync(path, Buffer.from(result.video_base64, 'base64'));\n  console.log('Job ' + jobId + ' clip ' + index + ' done in ' + result.elapsed_seconds + 's on ' + result.worker);\n  return '/ffmpeg/input/' + jobId + '_clip' + index + '.webm';\n};\n\nconst generateJobVideo = async (job, worker) => {\n  const prompts = job.clip_prompts || [];\n  const negPrompts = job.negative_prompts || [];\n  // Pad to exactly 4 clips — handles old 3-clip jobs gracefully\n  while (prompts.length < 4) {\n    const last = prompts[prompts.length - 1];\n    prompts.push(last + ', continuation shot, same subject from slightly different angle');\n    negPrompts.push(negPrompts[negPrompts.length - 1] || 'text, labels, watermarks, human faces, cartoon');\n    console.log('Job ' + job.job_id + ': padded clip ' + prompts.length + ' from last prompt');\n  }\n  if (prompts.length > 4) { prompts.length = 4; negPrompts.length = 4; }\n  console.log('Job ' + job.job_id + ': 4 clip_prompts confirmed');\n  const paths = [];\n  for (let i = 0; i < prompts.length; i++) {\n    paths.push(await generateClip(job.job_id, prompts[i], negPrompts[i], i, worker));\n  }\n  if (paths.length !== 4) throw new Error('Job ' + job.job_id + ': only ' + paths.length + '/4 clips generated successfully. Aborting assembly.');\n  for (let i = 0; i < paths.length; i++) {\n    const diskPath = paths[i].replace('/ffmpeg/input', '/data/ffmpeg/input');\n    if (!fs.existsSync(diskPath)) throw new Error('Job ' + job.job_id + ': clip ' + i + ' file missing on disk: ' + paths[i]);\n    const stat = fs.statSync(diskPath);\n    if (stat.size < 1000) throw new Error('Job ' + job.job_id + ': clip ' + i + ' is corrupt/empty (' + stat.size + ' bytes): ' + paths[i]);\n  }\n  console.log('Job ' + job.job_id + ': all 4 clips verified on disk.');\n  return paths;\n};\n\nconsole.log('Processing ' + jobs.length + ' job(s) in parallel, one dedicated GPU each (clips sequential per job)...');\nconst allPaths = await Promise.all(\n  jobs.map((job, i) => generateJobVideo(job, WORKERS[i % WORKERS.length]))\n);\nconsole.log('All ' + jobs.length + ' job(s) complete.');\n\nreturn jobs.map((job, i) => ({ json: {\n  ...job,\n  video_paths: allPaths[i],\n  clips_count: allPaths[i].length\n}}));\n"
+        "jsCode": "const { execSync } = require('child_process');\nconst fs = require('fs');\n\nconst items = $input.all().map(item => item.json);\n\nconst n8nClipDir  = '/data/ffmpeg/clips';\nconst contClipDir = '/ffmpeg/clips';\nconst TRANS = 0.3;\n\nfunction shuffle(arr) {\n  for (let i = arr.length - 1; i > 0; i--) {\n    const j = Math.floor(Math.random() * (i + 1));\n    [arr[i], arr[j]] = [arr[j], arr[i]];\n  }\n  return arr;\n}\n\nfunction getClipDuration(contPath) {\n  try {\n    const out = execSync(\n      'docker exec qpc_ffmpeg_runner ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 \"' + contPath + '\"',\n      { encoding: 'utf8', timeout: 10000 }\n    ).trim();\n    const d = parseFloat(out);\n    return (d > 0.5) ? d : 5.0;\n  } catch(e) {\n    return 5.0;\n  }\n}\n\nconst allClipFiles = fs.readdirSync(n8nClipDir).filter(f => f.endsWith('_norm.mp4'));\nif (allClipFiles.length === 0) throw new Error('No _norm.mp4 clips found in ' + n8nClipDir);\n\nreturn items.map(data => {\n  const targetDur = data.audio_duration || 19.1;\n  const candidates = shuffle([...allClipFiles]);\n\n  const selected = [];\n  const durations = [];\n  let assembled = 0;\n\n  for (let i = 0; i < candidates.length && assembled < targetDur; i++) {\n    const contPath = contClipDir + '/' + candidates[i];\n    const dur = getClipDuration(contPath);\n    if (dur < 1.0) continue;\n    selected.push(contPath);\n    durations.push(dur);\n    assembled += (selected.length > 1) ? (dur - TRANS) : dur;\n  }\n\n  if (selected.length === 0) throw new Error('Job ' + data.job_id + ': could not pick any clips');\n\n  console.log('Job ' + data.job_id + ': picked ' + selected.length + ' clips, assembled ~' + assembled.toFixed(2) + 's (target ' + targetDur + 's)');\n  selected.forEach((p, i) => console.log('  clip' + i + ': ' + p.split('/').pop() + ' (' + durations[i].toFixed(2) + 's)'));\n\n  return { json: {\n    ...data,\n    video_paths: selected,\n    clip_durations: durations,\n    clips_count: selected.length,\n    clip_source: 'library'\n  }};\n});"
       },
       "id": "nodeSubmit",
-      "name": "Generate Clips via GPU0-GPU3 (Wan2.2)",
+      "name": "Pick Random Clips from Library",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
         672,
         304
       ]
-    },
-    {
-      "parameters": {
-        "rule": {
-          "interval": [
-            {
-              "field": "cronExpression",
-              "expression": "0 1 * * *"
-            }
-          ]
-        }
-      },
-      "id": "s2q-kickoff",
-      "name": "Stage 2 Daily Kickoff",
-      "type": "n8n-nodes-base.scheduleTrigger",
-      "typeVersion": 1.1,
-      "position": [
-        224,
-        480
-      ]
-    },
-    {
-      "parameters": {
-        "httpMethod": "POST",
-        "path": "stage2-video-queue-next",
-        "responseMode": "onReceived",
-        "options": {}
-      },
-      "id": "s2q-webhook",
-      "name": "Stage 2 Queue Webhook",
-      "type": "n8n-nodes-base.webhook",
-      "typeVersion": 1.1,
-      "position": [
-        224,
-        600
-      ]
-    },
-    {
-      "parameters": {
-        "method": "GET",
-        "url": "https://sheets.googleapis.com/v4/spreadsheets/1VD-F6Wj47Dm_5Uo_zdIEuxOnqprepCPRTKEmTYs6mFs/values/Video%20Production%20Queue!A2:L1000",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "googleDriveOAuth2Api",
-        "options": {}
-      },
-      "id": "s2q-read",
-      "name": "Read Video Queue",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.1,
-      "position": [
-        448,
-        540
-      ],
-      "credentials": {
-        "googleDriveOAuth2Api": {
-          "id": "dwOT4VyMlmKAS9om",
-          "name": "Google Drive account (new)"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "jsCode": "const res = $input.first().json;\nconst rows = res.values || [];\nconst todayKey = new Date().toISOString().slice(0, 10);\nconst dailyCap = 12;\nconst STUCK_MS = 30 * 60 * 1000;\nconst now = Date.now();\n\nconst renderedToday = rows.filter(r => {\n  const status = (r[3] || '').toUpperCase().trim();\n  const readyAt = r[10] || '';\n  return (status === 'READY_TO_PUBLISH' || status === 'PUBLISHING' || status === 'PUBLISHED') && readyAt.startsWith(todayKey);\n}).length;\n\nif (renderedToday >= dailyCap) {\n  return [{ json: { stop: true, reason: 'DAILY_CAP_REACHED', renderedToday, dailyCap } }];\n}\n\nconst allRows = rows.map((r, i) => ({\n  rowIndex: i + 2,\n  status: (r[3] || '').toUpperCase().trim(),\n  job_id: r[0] || '',\n  topic: r[1] || '',\n  title: r[2] || '',\n  payloadJson: r[4] || '',\n  hashtags: r[7] || '',\n  sheetRow: r[8] || '',\n  readyForVideoAt: r[9] || ''\n}));\n\nlet ready = allRows.filter(r => r.status === 'READY_FOR_VIDEO');\nif (ready.length === 0) {\n  ready = allRows.filter(r => {\n    if (r.status !== 'IN_PROGRESS') return false;\n    const ts = r.readyForVideoAt ? new Date(r.readyForVideoAt).getTime() : 0;\n    return ts > 0 && (now - ts) > STUCK_MS;\n  });\n  if (ready.length > 0) console.log('Recovering ' + ready.length + ' stuck IN_PROGRESS job(s)');\n}\n\nif (ready.length === 0) {\n  return [{ json: { stop: true, reason: 'NO_READY_JOBS', renderedToday, dailyCap } }];\n}\n\nconst BATCH_SIZE = 4;\nconst batch = ready.slice(0, BATCH_SIZE);\nconsole.log('Picked ' + batch.length + ' job(s) for this batch: ' + batch.map(j => j.job_id).join(', '));\n\nreturn batch.map(job => {\n  let payload = {};\n  try { payload = JSON.parse(job.payloadJson); } catch (e) {}\n  return { json: {\n    stop: false,\n    rowIndex: job.rowIndex,\n    job_id: job.job_id,\n    topic: job.topic,\n    title: job.title,\n    hashtags: job.hashtags,\n    sheet_row: job.sheetRow,\n    readyForVideoAt: job.readyForVideoAt,\n    narration: payload.narration,\n    clip_prompts: payload.clip_prompts,\n    audio_path: payload.audio_path,\n    subs_path: payload.subs_path,\n    audio_duration: payload.audio_duration,\n    subtitle_chunks: payload.subtitle_chunks,\n    word_timings: payload.word_timings,\n    bgm_path: payload.bgm_path,\n    negative_prompts: payload.negative_prompts,\n    highlight_keywords: payload.highlight_keywords,\n    scenes: payload.scenes || [],\n    start_time: Date.now()\n  }};\n});\n"
-      },
-      "id": "s2q-find",
-      "name": "Find Next Ready Job",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        672,
-        540
-      ]
-    },
-    {
-      "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "strict"
-          },
-          "conditions": [
-            {
-              "id": "s2q-c1",
-              "leftValue": "={{ $json.stop }}",
-              "rightValue": false,
-              "operator": {
-                "type": "boolean",
-                "operation": "equals"
-              }
-            }
-          ],
-          "combinator": "and"
-        },
-        "options": {}
-      },
-      "id": "s2q-if",
-      "name": "IF Should Continue",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2.2,
-      "position": [
-        896,
-        540
-      ]
-    },
-    {
-      "parameters": {
-        "method": "PUT",
-        "url": "={{ `https://sheets.googleapis.com/v4/spreadsheets/1VD-F6Wj47Dm_5Uo_zdIEuxOnqprepCPRTKEmTYs6mFs/values/Video%20Production%20Queue!D${$json.rowIndex}?valueInputOption=RAW` }}",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "googleDriveOAuth2Api",
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ values: [[\"IN_PROGRESS\"]] }) }}",
-        "options": {}
-      },
-      "id": "s2q-markprog",
-      "name": "Mark IN_PROGRESS in Video Queue",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.1,
-      "position": [
-        1120,
-        680
-      ],
-      "credentials": {
-        "googleDriveOAuth2Api": {
-          "id": "dwOT4VyMlmKAS9om",
-          "name": "Google Drive account (new)"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "jsCode": "const data = $input.first().json;\nconsole.log('Stage 2 daily run idle. Reason: ' + data.reason + (data.renderedToday !== undefined ? '. Rendered today: ' + data.renderedToday + '/' + data.dailyCap : ''));\nreturn [{ json: { summary: 'stage2_idle', ...data } }];"
-      },
-      "id": "s2q-summary",
-      "name": "Stage 2 Daily Summary",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1120,
-        420
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "const items = $input.all();\nreturn items.map(item => ({ json: Object.assign({}, item.json, { hasRowIndex: !!item.json.rowIndex }) }));\n"
-      },
-      "id": "s2q-checkrow",
-      "name": "Check Has RowIndex",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        3088,
-        304
-      ]
-    },
-    {
-      "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "strict"
-          },
-          "conditions": [
-            {
-              "id": "s2q-c2",
-              "leftValue": "={{ $json.hasRowIndex }}",
-              "rightValue": true,
-              "operator": {
-                "type": "boolean",
-                "operation": "equals"
-              }
-            }
-          ],
-          "combinator": "and"
-        },
-        "options": {}
-      },
-      "id": "s2q-ifrow",
-      "name": "IF Has RowIndex",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2.2,
-      "position": [
-        3312,
-        304
-      ]
-    },
-    {
-      "parameters": {
-        "method": "PUT",
-        "url": "={{ `https://sheets.googleapis.com/v4/spreadsheets/1VD-F6Wj47Dm_5Uo_zdIEuxOnqprepCPRTKEmTYs6mFs/values/Video%20Production%20Queue!D${$json.rowIndex}:K${$json.rowIndex}?valueInputOption=RAW` }}",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "googleDriveOAuth2Api",
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ values: [[ 'READY_TO_PUBLISH', JSON.stringify({ narration: $json.narration, hashtags: $json.hashtags, final_video_path: $json.final_video_path, output_filename: $json.output_filename }), $json.drive_file_id, $json.drive_video_url, $json.hashtags, $json.sheet_row, $json.readyForVideoAt || '', new Date().toISOString() ]] }) }}",
-        "options": {}
-      },
-      "id": "s2q-markready",
-      "name": "Mark READY_TO_PUBLISH in Video Queue",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.1,
-      "position": [
-        3536,
-        220
-      ],
-      "credentials": {
-        "googleDriveOAuth2Api": {
-          "id": "dwOT4VyMlmKAS9om",
-          "name": "Google Drive account (new)"
-        }
-      }
     },
     {
       "parameters": {
@@ -455,17 +241,31 @@
       ]
     },
     {
-      "parameters": {
-        "jsCode": "const items = $input.all();\nconsole.log('Batch complete: ' + items.length + ' video(s) marked READY_TO_PUBLISH.');\nreturn [{ json: { batchSize: items.length, jobIds: items.map(i => i.json.job_id || i.json.rowIndex) } }];\n"
-      },
-      "id": "s2q-mergerefill",
-      "name": "Merge Before Refill",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
+      "id": "s2-update-queue",
+      "name": "Update Video Queue Row",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
       "position": [
-        3760,
-        220
-      ]
+        1800,
+        300
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "wUDvDA62yzWuxKP9",
+          "name": "Google Sheets account (new)"
+        }
+      },
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ 'https://sheets.googleapis.com/v4/spreadsheets/1VD-F6Wj47Dm_5Uo_zdIEuxOnqprepCPRTKEmTYs6mFs/values/Video%20Production%20Queue!D' + $json.queue_row_index + ':G' + $json.queue_row_index + '?valueInputOption=RAW' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ majorDimension: \"ROWS\", values: [[\"READY_TO_PUBLISH\", \"\", $json.drive_file_id || \"\", $json.video_url || $json.drive_video_url || \"\"]] }) }}",
+        "options": {}
+      },
+      "continueOnFail": true
     }
   ],
   "pinData": {},
@@ -507,7 +307,18 @@
       "main": [
         [
           {
-            "node": "Generate Clips via GPU0-GPU3 (Wan2.2)",
+            "node": "Pick Random Clips from Library",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pick Random Clips from Library": {
+      "main": [
+        [
+          {
+            "node": "Assemble Video",
             "type": "main",
             "index": 0
           }
@@ -584,132 +395,14 @@
       "main": [
         [
           {
-            "node": "Check Has RowIndex",
+            "node": "Update Video Queue Row",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Stage 2 Daily Kickoff": {
-      "main": [
-        [
-          {
-            "node": "Read Video Queue",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Stage 2 Queue Webhook": {
-      "main": [
-        [
-          {
-            "node": "Read Video Queue",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Read Video Queue": {
-      "main": [
-        [
-          {
-            "node": "Find Next Ready Job",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Find Next Ready Job": {
-      "main": [
-        [
-          {
-            "node": "IF Should Continue",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "IF Should Continue": {
-      "main": [
-        [
-          {
-            "node": "Mark IN_PROGRESS in Video Queue",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Stage 2 Daily Summary",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Mark IN_PROGRESS in Video Queue": {
-      "main": [
-        [
-          {
-            "node": "Generate Clips via GPU0-GPU3 (Wan2.2)",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Check Has RowIndex": {
-      "main": [
-        [
-          {
-            "node": "IF Has RowIndex",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "IF Has RowIndex": {
-      "main": [
-        [
-          {
-            "node": "Mark READY_TO_PUBLISH in Video Queue",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        []
-      ]
-    },
-    "Mark READY_TO_PUBLISH in Video Queue": {
-      "main": [
-        [
-          {
-            "node": "Merge Before Refill",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Generate Clips via GPU0-GPU3 (Wan2.2)": {
-      "main": [
-        [
-          {
-            "node": "Assemble Video",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Merge Before Refill": {
+    "Update Video Queue Row": {
       "main": [
         [
           {

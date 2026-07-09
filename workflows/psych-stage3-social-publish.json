@@ -1,0 +1,269 @@
+{
+  "name": "Aperture Channel - Stage 3 - Social Publish (Standalone)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 */3 * * *"
+            }
+          ]
+        }
+      },
+      "id": "psych4-n0",
+      "name": "Every 3 Hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {},
+      "id": "psych4-n0b",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [0, 160]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://sheets.googleapis.com/v4/spreadsheets/1VD-F6Wj47Dm_5Uo_zdIEuxOnqprepCPRTKEmTYs6mFs/values/Aperture%20Video%20Queue!A2:L",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "psych4-n1",
+      "name": "Read Video Queue",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [260, 80],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "wUDvDA62yzWuxKP9",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const res = $input.first().json;\nconst rows = res.values || [];\nlet found = null, idx = -1;\nfor (let i = 0; i < rows.length; i++) {\n  if ((rows[i][2] || '').toString().trim() === 'Ready to Post') { found = rows[i]; idx = i; break; }\n}\nif (!found) throw new Error('No rows with Status = Ready to Post in Aperture Video Queue.');\nconst rowNumber = idx + 2;\nreturn [{ json: {\n  job_id:          (found[0] || '').trim(),\n  topic:           (found[1] || '').trim(),\n  drive_video_url: (found[3] || '').trim(),\n  title:           (found[4] || '').trim(),\n  hashtags:        (found[5] || '').trim(),\n  queue_row:       rowNumber\n}}];"
+      },
+      "id": "psych4-n2",
+      "name": "Pick Next Ready Row",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 80]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ 'https://sheets.googleapis.com/v4/spreadsheets/1VD-F6Wj47Dm_5Uo_zdIEuxOnqprepCPRTKEmTYs6mFs/values/Aperture%20Video%20Queue!C' + $json.queue_row + '?valueInputOption=USER_ENTERED' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ majorDimension: 'ROWS', values: [['Posting']] }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "psych4-n3",
+      "name": "Mark Posting",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "continueOnFail": true,
+      "position": [740, 80],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "wUDvDA62yzWuxKP9",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const { execSync } = require('child_process');\nconst data = $('Pick Next Ready Row').first().json;\nconst jobId = data.job_id;\nconst url   = data.drive_video_url;\nif (!url) throw new Error('No drive_video_url for ' + jobId);\n\nconst contPath = '/ffmpeg/input/' + jobId + '_publish.mp4';\nconst cmd = 'docker exec qpc_ffmpeg_runner curl -sL -o \"' + contPath + '\" \"' + url + '\" && echo DL_OK';\nconst res = execSync(cmd, { encoding: 'utf-8', timeout: 180000 });\nif (!res.includes('DL_OK')) throw new Error('Failed to download final video from Drive for ' + jobId);\n\nconsole.log('Downloaded publish source for ' + jobId + ' -> ' + contPath);\nreturn [{ json: { ...data, publish_file_path: contPath } }];"
+      },
+      "id": "psych4-n4",
+      "name": "Download Video for Publishing",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [980, 80]
+    },
+    {
+      "parameters": {
+        "jsCode": "const https = require('https');\nconst { execSync } = require('child_process');\nconst data = $('Download Video for Publishing').first().json;\n\nfunction post(hostname, path, body, headers) {\n  return new Promise((resolve, reject) => {\n    const buf = Buffer.from(body);\n    const req = https.request({ hostname, path, method: 'POST', headers: Object.assign({ 'Content-Length': buf.length }, headers) }, (res) => {\n      const chunks = [];\n      res.on('data', c => chunks.push(c));\n      res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks).toString() }));\n    });\n    req.on('error', reject);\n    req.write(buf);\n    req.end();\n  });\n}\n\ntry {\n  if (!$env.YOUTUBE_OAUTH_CLIENT_ID || !$env.YOUTUBE_OAUTH_CLIENT_SECRET || !$env.YOUTUBE_REFRESH_TOKEN)\n    throw new Error('YouTube OAuth env vars not set');\n\n  const tokenBody = 'client_id=' + encodeURIComponent($env.YOUTUBE_OAUTH_CLIENT_ID) +\n    '&client_secret=' + encodeURIComponent($env.YOUTUBE_OAUTH_CLIENT_SECRET) +\n    '&refresh_token=' + encodeURIComponent($env.YOUTUBE_REFRESH_TOKEN) +\n    '&grant_type=refresh_token';\n  const tokenRes = await post('oauth2.googleapis.com', '/token', tokenBody, { 'Content-Type': 'application/x-www-form-urlencoded' });\n  const tokenJson = JSON.parse(tokenRes.body);\n  if (!tokenJson.access_token) throw new Error('YouTube token refresh failed: ' + tokenRes.body.slice(0,200));\n  const accessToken = tokenJson.access_token;\n\n  const snippet = {\n    snippet: {\n      title: (data.title || data.topic || 'Aperture').slice(0, 95),\n      description: (data.hashtags || ''),\n      tags: (data.hashtags || '').replace(/#/g, '').split(/\\s+/).filter(Boolean),\n      categoryId: '27'\n    },\n    status: { privacyStatus: 'public', selfDeclaredMadeForKids: false }\n  };\n\n  const initCmd = 'docker exec qpc_ffmpeg_runner curl -sD - -o /dev/null -X POST ' +\n    '-H \"Authorization: Bearer ' + accessToken + '\" ' +\n    '-H \"Content-Type: application/json; charset=UTF-8\" ' +\n    '-H \"X-Upload-Content-Type: video/mp4\" ' +\n    \"-d '\" + JSON.stringify(snippet).replace(/'/g, \"'\\\\''\") + \"' \" +\n    '\"https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status\"';\n  const initRes = execSync(initCmd, { encoding: 'utf-8', timeout: 30000 });\n  const locMatch = initRes.match(/[Ll]ocation:\\s*(\\S+)/);\n  if (!locMatch) throw new Error('YouTube resumable init failed: ' + initRes.slice(0,300));\n  const uploadUrl = locMatch[1].trim();\n\n  const putCmd = 'docker exec qpc_ffmpeg_runner curl -s -X PUT ' +\n    '-H \"Content-Type: video/mp4\" ' +\n    '--upload-file \"' + data.publish_file_path + '\" \"' + uploadUrl + '\"';\n  const putRes = execSync(putCmd, { encoding: 'utf-8', timeout: 600000 });\n  const parsed = JSON.parse(putRes);\n  if (!parsed.id) throw new Error('YouTube upload finish failed: ' + putRes.slice(0,300));\n\n  console.log('YouTube OK -> ' + parsed.id);\n  return [{ json: { platform: 'youtube', success: true, url: 'https://youtube.com/shorts/' + parsed.id } }];\n} catch (e) {\n  console.error('YouTube upload failed: ' + e.message);\n  return [{ json: { platform: 'youtube', success: false, error: e.message } }];\n}"
+      },
+      "id": "psych4-n5",
+      "name": "Upload to YouTube",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "continueOnFail": true,
+      "position": [1220, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "const https = require('https');\nconst data = $('Download Video for Publishing').first().json;\n\nfunction call(method, path, body) {\n  return new Promise((resolve, reject) => {\n    const buf = body ? Buffer.from(body) : null;\n    const opts = { hostname: 'graph.facebook.com', path, method, headers: {} };\n    if (buf) { opts.headers['Content-Type'] = 'application/x-www-form-urlencoded'; opts.headers['Content-Length'] = buf.length; }\n    const req = https.request(opts, (res) => {\n      const chunks = [];\n      res.on('data', c => chunks.push(c));\n      res.on('end', () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString())); } catch(e) { reject(new Error('Non-JSON from IG: ' + Buffer.concat(chunks).toString().slice(0,200))); } });\n    });\n    req.on('error', reject);\n    if (buf) req.write(buf);\n    req.end();\n  });\n}\n\ntry {\n  const igUserId = $env.INSTAGRAM_BUSINESS_ACCOUNT_ID;\n  const token = $env.FB_PAGE_ACCESS_TOKEN || $env.FACEBOOK_PAGE_ACCESS_TOKEN;\n  if (!igUserId || !token) throw new Error('INSTAGRAM_BUSINESS_ACCOUNT_ID / FB_PAGE_ACCESS_TOKEN not set');\n\n  const caption = ((data.title || data.topic || '') + '\\n\\n' + (data.hashtags || '')).slice(0, 2190);\n  const createBody = 'media_type=REELS&video_url=' + encodeURIComponent(data.drive_video_url) +\n    '&caption=' + encodeURIComponent(caption) + '&access_token=' + encodeURIComponent(token);\n  const create = await call('POST', '/v20.0/' + igUserId + '/media', createBody);\n  if (!create.id) throw new Error('IG container create failed: ' + JSON.stringify(create).slice(0,300));\n\n  let status = 'IN_PROGRESS', tries = 0;\n  while (status === 'IN_PROGRESS' && tries < 20) {\n    await new Promise(r => setTimeout(r, 5000));\n    const check = await call('GET', '/v20.0/' + create.id + '?fields=status_code&access_token=' + encodeURIComponent(token), null);\n    status = check.status_code || 'ERROR';\n    tries++;\n  }\n  if (status !== 'FINISHED') throw new Error('IG container never finished processing, last status: ' + status);\n\n  const publishBody = 'creation_id=' + create.id + '&access_token=' + encodeURIComponent(token);\n  const publish = await call('POST', '/v20.0/' + igUserId + '/media_publish', publishBody);\n  if (!publish.id) throw new Error('IG publish failed: ' + JSON.stringify(publish).slice(0,300));\n\n  const perm = await call('GET', '/v20.0/' + publish.id + '?fields=permalink&access_token=' + encodeURIComponent(token), null);\n  console.log('Instagram OK -> ' + publish.id);\n  return [{ json: { platform: 'instagram', success: true, url: perm.permalink || ('https://www.instagram.com/reel/' + publish.id) } }];\n} catch (e) {\n  console.error('Instagram upload failed: ' + e.message);\n  return [{ json: { platform: 'instagram', success: false, error: e.message } }];\n}"
+      },
+      "id": "psych4-n6",
+      "name": "Upload to Instagram",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "continueOnFail": true,
+      "position": [1220, 160]
+    },
+    {
+      "parameters": {
+        "jsCode": "// NOTE: Meta's Reels Publishing API fields shift between API versions — verify against\n// current developers.facebook.com/docs/video-api/guides/reels before relying on this in production.\nconst https = require('https');\nconst data = $('Download Video for Publishing').first().json;\n\nfunction call(method, path, body) {\n  return new Promise((resolve, reject) => {\n    const buf = body ? Buffer.from(body) : null;\n    const opts = { hostname: 'graph.facebook.com', path, method, headers: {} };\n    if (buf) { opts.headers['Content-Type'] = 'application/x-www-form-urlencoded'; opts.headers['Content-Length'] = buf.length; }\n    const req = https.request(opts, (res) => {\n      const chunks = [];\n      res.on('data', c => chunks.push(c));\n      res.on('end', () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString())); } catch(e) { reject(new Error('Non-JSON from FB: ' + Buffer.concat(chunks).toString().slice(0,200))); } });\n    });\n    req.on('error', reject);\n    if (buf) req.write(buf);\n    req.end();\n  });\n}\n\ntry {\n  const pageId = $env.FB_PAGE_ID || $env.FACEBOOK_PAGE_ID;\n  const token = $env.FB_PAGE_ACCESS_TOKEN || $env.FACEBOOK_PAGE_ACCESS_TOKEN;\n  if (!pageId || !token) throw new Error('FB_PAGE_ID / FB_PAGE_ACCESS_TOKEN not set');\n\n  const startBody = 'upload_phase=start&access_token=' + encodeURIComponent(token);\n  const start = await call('POST', '/v20.0/' + pageId + '/video_reels', startBody);\n  if (!start.video_id || !start.upload_url) throw new Error('FB Reels start failed: ' + JSON.stringify(start).slice(0,300));\n\n  const upload = await new Promise((resolve, reject) => {\n    const u = new URL(start.upload_url);\n    const req = https.request({ hostname: u.hostname, path: u.pathname + u.search, method: 'POST', headers: {\n      'Authorization': 'OAuth ' + token,\n      'file_url': data.drive_video_url\n    }}, (res) => {\n      const chunks = [];\n      res.on('data', c => chunks.push(c));\n      res.on('end', () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString())); } catch(e) { resolve({ success: res.statusCode < 300 }); } });\n    });\n    req.on('error', reject);\n    req.end();\n  });\n\n  const caption = ((data.title || data.topic || '') + '\\n\\n' + (data.hashtags || '')).slice(0, 2000);\n  const finishBody = 'upload_phase=finish&video_id=' + start.video_id + '&video_state=PUBLISHED&description=' + encodeURIComponent(caption) + '&access_token=' + encodeURIComponent(token);\n  const finish = await call('POST', '/v20.0/' + pageId + '/video_reels', finishBody);\n  if (!finish.success) throw new Error('FB Reels finish failed: ' + JSON.stringify(finish).slice(0,300));\n\n  console.log('Facebook Reels OK -> ' + start.video_id);\n  return [{ json: { platform: 'facebook', success: true, url: 'https://www.facebook.com/reel/' + start.video_id } }];\n} catch (e) {\n  console.error('Facebook Reels upload failed: ' + e.message);\n  return [{ json: { platform: 'facebook', success: false, error: e.message } }];\n}"
+      },
+      "id": "psych4-n7",
+      "name": "Upload to Facebook Reels",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "continueOnFail": true,
+      "position": [1220, 320]
+    },
+    {
+      "parameters": {
+        "jsCode": "// NOTE: LinkedIn's Video API for organization pages typically requires special Marketing\n// Developer Platform access. Verify org has video-upload permission before relying on this.\nconst https = require('https');\nconst { execSync } = require('child_process');\nconst data = $('Download Video for Publishing').first().json;\n\nfunction call(hostname, path, method, body, token) {\n  return new Promise((resolve, reject) => {\n    const buf = body ? Buffer.from(JSON.stringify(body)) : null;\n    const headers = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json', 'LinkedIn-Version': '202401', 'X-Restli-Protocol-Version': '2.0.0' };\n    if (buf) headers['Content-Length'] = buf.length;\n    const req = https.request({ hostname, path, method, headers }, (res) => {\n      const chunks = [];\n      res.on('data', c => chunks.push(c));\n      res.on('end', () => { const raw = Buffer.concat(chunks).toString(); try { resolve({ status: res.statusCode, json: raw ? JSON.parse(raw) : {}, headers: res.headers }); } catch(e) { resolve({ status: res.statusCode, json: {}, raw }); } });\n    });\n    req.on('error', reject);\n    if (buf) req.write(buf);\n    req.end();\n  });\n}\n\ntry {\n  const orgUrn = 'urn:li:organization:' + $env.LINKEDIN_ORGANIZATION_ID;\n  const token = $env.LINKEDIN_ACCESS_TOKEN;\n  if (!$env.LINKEDIN_ORGANIZATION_ID || !token) throw new Error('LINKEDIN_ORGANIZATION_ID / LINKEDIN_ACCESS_TOKEN not set');\n\n  const init = await call('api.linkedin.com', '/rest/videos?action=initializeUpload', 'POST', {\n    initializeUploadRequest: { owner: orgUrn, fileSizeBytes: null, uploadCaptions: false, uploadThumbnail: false }\n  }, token);\n  const uploadUrl = init.json && init.json.value && init.json.value.uploadInstructions && init.json.value.uploadInstructions[0] && init.json.value.uploadInstructions[0].uploadUrl;\n  const videoUrn = init.json && init.json.value && init.json.value.video;\n  if (!uploadUrl || !videoUrn) throw new Error('LinkedIn initializeUpload failed: ' + JSON.stringify(init.json).slice(0,300));\n\n  const putCmd = 'docker exec qpc_ffmpeg_runner curl -s -X PUT --upload-file \"' + data.publish_file_path + '\" \"' + uploadUrl + '\"';\n  execSync(putCmd, { encoding: 'utf-8', timeout: 600000 });\n\n  await call('api.linkedin.com', '/rest/videos?action=finalizeUpload', 'POST', { finalizeUploadRequest: { video: videoUrn, uploadToken: '' } }, token);\n\n  const caption = ((data.title || data.topic || '') + '\\n\\n' + (data.hashtags || '')).slice(0, 3000);\n  const post = await call('api.linkedin.com', '/rest/posts', 'POST', {\n    author: orgUrn,\n    commentary: caption,\n    visibility: 'PUBLIC',\n    distribution: { feedDistribution: 'MAIN_FEED', targetEntities: [], thirdPartyDistributionChannels: [] },\n    content: { media: { title: (data.title || data.topic || 'Aperture'), id: videoUrn } },\n    lifecycleState: 'PUBLISHED'\n  }, token);\n\n  const postId = post.headers && post.headers['x-restli-id'];\n  console.log('LinkedIn OK -> ' + (postId || videoUrn));\n  return [{ json: { platform: 'linkedin', success: true, url: postId ? ('https://www.linkedin.com/feed/update/' + postId) : 'posted' } }];\n} catch (e) {\n  console.error('LinkedIn upload failed: ' + e.message);\n  return [{ json: { platform: 'linkedin', success: false, error: e.message } }];\n}"
+      },
+      "id": "psych4-n8",
+      "name": "Upload to LinkedIn",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "continueOnFail": true,
+      "position": [1220, 480]
+    },
+    {
+      "parameters": {
+        "jsCode": "// NOTE: Unaudited TikTok apps can only post with privacy_level SELF_ONLY (draft/private).\n// Public posting requires TikTok to approve the app for the Content Posting API.\nconst https = require('https');\nconst data = $('Download Video for Publishing').first().json;\n\nfunction call(path, body, token) {\n  return new Promise((resolve, reject) => {\n    const buf = Buffer.from(JSON.stringify(body));\n    const req = https.request({ hostname: 'open.tiktokapis.com', path, method: 'POST', headers: {\n      'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json; charset=UTF-8', 'Content-Length': buf.length\n    }}, (res) => {\n      const chunks = [];\n      res.on('data', c => chunks.push(c));\n      res.on('end', () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString())); } catch(e) { reject(new Error('Non-JSON from TikTok')); } });\n    });\n    req.on('error', reject);\n    req.write(buf);\n    req.end();\n  });\n}\n\ntry {\n  const token = $env.TIKTOK_ACCESS_TOKEN;\n  if (!token) throw new Error('TIKTOK_ACCESS_TOKEN not set');\n  const privacyLevel = $env.TIKTOK_APP_AUDITED === 'true' ? 'PUBLIC_TO_EVERYONE' : 'SELF_ONLY';\n\n  const init = await call('/v2/post/publish/video/init/', {\n    post_info: { title: (data.title || data.topic || 'Aperture').slice(0, 150), privacy_level: privacyLevel, disable_duet: false, disable_comment: false, disable_stitch: false },\n    source_info: { source: 'PULL_FROM_URL', video_url: data.drive_video_url }\n  }, token);\n\n  const publishId = init.data && init.data.publish_id;\n  if (!publishId) throw new Error('TikTok init failed: ' + JSON.stringify(init).slice(0,300));\n\n  let status = 'PROCESSING_UPLOAD', tries = 0;\n  while ((status === 'PROCESSING_UPLOAD' || status === 'PROCESSING_DOWNLOAD') && tries < 20) {\n    await new Promise(r => setTimeout(r, 5000));\n    const check = await call('/v2/post/publish/status/fetch/', { publish_id: publishId }, token);\n    status = (check.data && check.data.status) || 'FAILED';\n    tries++;\n  }\n  if (status !== 'PUBLISH_COMPLETE') throw new Error('TikTok never completed, last status: ' + status + (privacyLevel === 'SELF_ONLY' ? ' (app not yet audited -> posted as private draft only)' : ''));\n\n  console.log('TikTok OK -> ' + publishId);\n  return [{ json: { platform: 'tiktok', success: true, url: privacyLevel === 'SELF_ONLY' ? 'posted as private draft (app unaudited)' : 'posted publicly' } }];\n} catch (e) {\n  console.error('TikTok upload failed: ' + e.message);\n  return [{ json: { platform: 'tiktok', success: false, error: e.message } }];\n}"
+      },
+      "id": "psych4-n9",
+      "name": "Upload to TikTok",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "continueOnFail": true,
+      "position": [1220, 640]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $('Pick Next Ready Row').first().json;\nconst results = ['Upload to YouTube','Upload to Instagram','Upload to Facebook Reels','Upload to LinkedIn','Upload to TikTok'].map(n => {\n  try { return $(n).first().json; } catch(e) { return { platform: n, success: false, error: 'node did not run' }; }\n});\n\nconst byPlatform = {};\nresults.forEach(r => { byPlatform[r.platform] = r; });\n\nconst anySuccess = results.some(r => r.success);\nconsole.log('Publish results for ' + data.job_id + ': ' + results.map(r => r.platform + '=' + (r.success ? 'OK' : 'FAIL')).join(', '));\n\nreturn [{ json: {\n  ...data,\n  youtube_url:   (byPlatform.youtube   && byPlatform.youtube.success)   ? byPlatform.youtube.url   : '',\n  instagram_url: (byPlatform.instagram && byPlatform.instagram.success) ? byPlatform.instagram.url : '',\n  facebook_url:  (byPlatform.facebook  && byPlatform.facebook.success)  ? byPlatform.facebook.url  : '',\n  linkedin_url:  (byPlatform.linkedin  && byPlatform.linkedin.success)  ? byPlatform.linkedin.url  : '',\n  tiktok_url:    (byPlatform.tiktok    && byPlatform.tiktok.success)    ? byPlatform.tiktok.url    : '',\n  any_success:   anySuccess,\n  posted_at:     new Date().toISOString()\n}}];"
+      },
+      "id": "psych4-n10",
+      "name": "Collect Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1460, 320]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ 'https://sheets.googleapis.com/v4/spreadsheets/1VD-F6Wj47Dm_5Uo_zdIEuxOnqprepCPRTKEmTYs6mFs/values/Aperture%20Video%20Queue!C' + $json.queue_row + ':L' + $json.queue_row + '?valueInputOption=USER_ENTERED' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ majorDimension: 'ROWS', values: [[ $json.any_success ? 'Posted' : 'Failed', $json.drive_video_url, $json.title, $json.hashtags, $json.youtube_url, $json.instagram_url, $json.tiktok_url, $json.facebook_url, $json.linkedin_url, $json.posted_at ]] }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "psych4-n11",
+      "name": "Update Video Queue Row",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "continueOnFail": true,
+      "position": [1700, 320],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "wUDvDA62yzWuxKP9",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://sheets.googleapis.com/v4/spreadsheets/1VD-F6Wj47Dm_5Uo_zdIEuxOnqprepCPRTKEmTYs6mFs/values/Aperture%20Topics!A2:A",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "psych4-n12",
+      "name": "Lookup Topics Row",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "continueOnFail": true,
+      "position": [1940, 320],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "wUDvDA62yzWuxKP9",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const jobId = $('Collect Results').first().json.job_id;\nconst res = $input.first().json;\nconst rows = res.values || [];\nlet rowNumber = null;\nfor (let i = 0; i < rows.length; i++) {\n  if ((rows[i][0] || '').toString().trim() === jobId) { rowNumber = i + 2; break; }\n}\nif (!rowNumber) { console.warn('Could not find ' + jobId + ' in Aperture Topics to mark LIVE'); }\nreturn [{ json: { job_id: jobId, topics_row: rowNumber } }];"
+      },
+      "id": "psych4-n13",
+      "name": "Find Topics Row Number",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2180, 320]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ $json.topics_row ? ('https://sheets.googleapis.com/v4/spreadsheets/1VD-F6Wj47Dm_5Uo_zdIEuxOnqprepCPRTKEmTYs6mFs/values/Aperture%20Topics!B' + $json.topics_row + '?valueInputOption=USER_ENTERED') : 'https://sheets.googleapis.com/v4/spreadsheets/1VD-F6Wj47Dm_5Uo_zdIEuxOnqprepCPRTKEmTYs6mFs/values/Aperture%20Topics!B1?valueInputOption=USER_ENTERED' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ majorDimension: 'ROWS', values: [['LIVE']] }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "psych4-n14",
+      "name": "Mark Aperture Topics LIVE",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "continueOnFail": true,
+      "position": [2420, 320],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "wUDvDA62yzWuxKP9",
+          "name": "Google Sheets account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every 3 Hours": { "main": [[{ "node": "Read Video Queue", "type": "main", "index": 0 }]] },
+    "Manual Trigger": { "main": [[{ "node": "Read Video Queue", "type": "main", "index": 0 }]] },
+    "Read Video Queue": { "main": [[{ "node": "Pick Next Ready Row", "type": "main", "index": 0 }]] },
+    "Pick Next Ready Row": { "main": [[{ "node": "Mark Posting", "type": "main", "index": 0 }]] },
+    "Mark Posting": { "main": [[{ "node": "Download Video for Publishing", "type": "main", "index": 0 }]] },
+    "Download Video for Publishing": { "main": [[{ "node": "Upload to YouTube", "type": "main", "index": 0 }]] },
+    "Upload to YouTube": { "main": [[{ "node": "Upload to Instagram", "type": "main", "index": 0 }]] },
+    "Upload to Instagram": { "main": [[{ "node": "Upload to Facebook Reels", "type": "main", "index": 0 }]] },
+    "Upload to Facebook Reels": { "main": [[{ "node": "Upload to LinkedIn", "type": "main", "index": 0 }]] },
+    "Upload to LinkedIn": { "main": [[{ "node": "Upload to TikTok", "type": "main", "index": 0 }]] },
+    "Upload to TikTok": { "main": [[{ "node": "Collect Results", "type": "main", "index": 0 }]] },
+    "Collect Results": { "main": [[{ "node": "Update Video Queue Row", "type": "main", "index": 0 }]] },
+    "Update Video Queue Row": { "main": [[{ "node": "Lookup Topics Row", "type": "main", "index": 0 }]] },
+    "Lookup Topics Row": { "main": [[{ "node": "Find Topics Row Number", "type": "main", "index": 0 }]] },
+    "Find Topics Row Number": { "main": [[{ "node": "Mark Aperture Topics LIVE", "type": "main", "index": 0 }]] }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "id": "psych-stage3-social-publish"
+}

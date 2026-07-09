@@ -60,6 +60,7 @@ services:
       - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
       - N8N_HOST=${N8N_HOST}
       - N8N_PORT=${N8N_PORT}
+      - N8N_RUNNERS_DISABLED=true
       - N8N_RUNNERS_BROKER_PORT=5685
       - N8N_PROTOCOL=http
       - WEBHOOK_URL=${N8N_WEBHOOK_BASE_URL}
@@ -72,7 +73,7 @@ services:
       - N8N_RUNNERS_HEARTBEAT_INTERVAL=600
       - N8N_RUNNERS_TASK_TIMEOUT=14400
       - N8N_RUNNERS_MAX_OLD_SPACE_SIZE=2560
-      - N8N_FILES_ALLOWED_PATHS=/data/ffmpeg/input,/data/ffmpeg/output,/data/uploads,/data/config
+      - N8N_FILES_ALLOWED_PATHS=/data/ffmpeg/input,/data/ffmpeg/output,/data/ffmpeg/clips,/data/uploads,/data/config
       - N8N_USER_FOLDER=/home/node/.n8n
       # PostgreSQL connection
       - DB_TYPE=postgresdb
@@ -97,7 +98,9 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - GOOGLE_AI_API_KEY=${GOOGLE_AI_API_KEY}
       - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY}
+      - ELEVENLABS_API_KEY_APERTURE=${ELEVENLABS_API_KEY_APERTURE}
       - ELEVENLABS_VOICE_ID=${ELEVENLABS_VOICE_ID}
+      - ELEVENLABS_VOICE_ID_APERTURE=${ELEVENLABS_VOICE_ID_APERTURE}
       - HEYGEN_API_KEY=${HEYGEN_API_KEY}
       - HEYGEN_AVATAR_ID=${HEYGEN_AVATAR_ID}
       - YOUTUBE_CHANNEL_ID=${YOUTUBE_CHANNEL_ID}
@@ -130,6 +133,7 @@ services:
       - ./manim/combined:/data/manim/combined
       - ./ffmpeg/input:/data/ffmpeg/input
       - ./ffmpeg/output:/data/ffmpeg/output
+      - ./ffmpeg/assemble-all clip:/data/ffmpeg/clips
       - ./uploads:/data/uploads
       - ./config:/data/config
       - ./workflows:/data/workflows
@@ -179,8 +183,14 @@ services:
     volumes:
       - ./ffmpeg/input:/ffmpeg/input
       - ./ffmpeg/output:/ffmpeg/output
+      - ./ffmpeg/assemble-all clip:/ffmpeg/clips
       - ./uploads:/ffmpeg/uploads
       - ./config:/ffmpeg/config
+      # Shared with manim-runner so ffmpeg can read the Aperture quote
+      # compositor's PNG output (compositing needs Python/PIL, which only
+      # manim-runner has; video assembly needs ffmpeg, which only this
+      # container has).
+      - ./manim/renders:/ffmpeg/manim_renders
     command: tail -f /dev/null
 
 volumes:

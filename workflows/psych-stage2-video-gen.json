@@ -1,0 +1,552 @@
+{
+  "name": "Aperture Channel - Stage 2 - Image Generation, Assembly & Drive Upload",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "psych2-n0",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "psych-stage2-video",
+        "responseMode": "onReceived",
+        "responseData": "firstEntryJson",
+        "options": {}
+      },
+      "id": "psych2-n1",
+      "name": "Stage 2 Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        0,
+        200
+      ],
+      "webhookId": "aperture-stage2-video"
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw  = $input.first().json;\nconst body = (raw.body !== undefined) ? raw.body : raw;\n\nif (!body.job_id)                           throw new Error('Stage 2 missing: job_id');\nif (!body.image_prompt && !body.image_url)  throw new Error('Stage 2 missing: image_prompt (or pre-provide image_url to skip Seedream)');\nif (!body.quote)                            throw new Error('Stage 2 missing: quote');\n\nconst wsKey = $env.WAVESPEED_API_KEY || '';\nif (!wsKey) console.warn('WARNING: WAVESPEED_API_KEY not set — Seedream call will fail');\n\nconsole.log('Stage 2 START | job:', body.job_id, '| philosopher:', body.philosopher);\n\nreturn [{ json: { ...body, ws_key: wsKey } }];\n"
+      },
+      "id": "psych2-n2",
+      "name": "Extract & Prepare",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const https = require('https');\nconst data  = $input.first().json;\n\n// If image_url is already provided, skip Seedream entirely (useful for retests)\nif (data.image_url) {\n  console.log('image_url pre-provided, skipping Seedream API call:', data.image_url);\n  return [{ json: { ...data, seedream_job_id: null, poll_attempt: 0, all_done: 1 } }];\n}\n\nconst wsKey = data.ws_key || $env.WAVESPEED_API_KEY;\nconst prompt = data.image_prompt;\n\nif (!wsKey) throw new Error('WAVESPEED_API_KEY not set. Add in n8n Settings > Environment Variables.');\nif (!prompt) throw new Error('Missing image_prompt going into Seedream submission.');\n\nconst body = { prompt, size: '1024*1024', seed: -1, enable_base64_output: false, enable_sync_mode: false };\nconst buf = Buffer.from(JSON.stringify(body));\n\nconst result = await new Promise((resolve, reject) => {\n  const req = https.request({\n    hostname: 'api.wavespeed.ai',\n    path:     '/api/v3/bytedance/seedream-v4',\n    method:   'POST',\n    headers:  { 'Authorization': 'Bearer ' + wsKey, 'Content-Type': 'application/json', 'Content-Length': buf.length }\n  }, (res) => {\n    const chunks = [];\n    res.on('data', c => chunks.push(c));\n    res.on('end', () => {\n      try { resolve(JSON.parse(Buffer.concat(chunks).toString())); }\n      catch(e) { reject(new Error('Bad JSON from Wavespeed: ' + Buffer.concat(chunks).toString().slice(0,300))); }\n    });\n  });\n  req.on('error', reject);\n  req.write(buf);\n  req.end();\n});\n\nif (!result.data || !result.data.id) throw new Error('Seedream submit failed: ' + JSON.stringify(result).slice(0,300));\nconsole.log('Seedream submitted -> ' + result.data.id);\n\nreturn [{ json: { ...data, seedream_job_id: result.data.id, image_url: null, poll_attempt: 0, all_done: 0, submitted_at: Date.now() } }];\n"
+      },
+      "id": "psych2-n3",
+      "name": "Submit Seedream Image Job",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        500,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 15,
+        "unit": "seconds"
+      },
+      "id": "psych2-n4",
+      "name": "Wait 15 Seconds",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [
+        740,
+        100
+      ],
+      "webhookId": "psych2-img-poll-resume"
+    },
+    {
+      "parameters": {
+        "jsCode": "const https  = require('https');\nconst data   = $input.first().json;\n\n// If image was pre-provided (bypass mode), skip polling entirely\nif (data.all_done == 1 && !data.seedream_job_id) {\n  console.log('Image pre-provided, skipping Seedream poll');\n  return [{ json: { ...data, all_done: 1 } }];\n}\n\nconst wsKey  = data.ws_key || $env.WAVESPEED_API_KEY;\nconst jobId  = data.seedream_job_id;\nconst attempt= (data.poll_attempt || 0) + 1;\n\nif (!wsKey) throw new Error('WAVESPEED_API_KEY not set.');\nconsole.log('--- Poll #' + attempt + ' (image) ---');\n\nfunction apiGet(taskId) {\n  return new Promise((resolve, reject) => {\n    const req = https.request({\n      hostname: 'api.wavespeed.ai',\n      path:     '/api/v3/predictions/' + taskId + '/result',\n      method:   'GET',\n      headers:  { 'Authorization': 'Bearer ' + wsKey }\n    }, (res) => {\n      const chunks = [];\n      res.on('data', c => chunks.push(c));\n      res.on('end', () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString())); } catch(e) { reject(new Error('Non-JSON from Wavespeed')); } });\n    });\n    req.on('error', reject);\n    req.end();\n  });\n}\n\nconst r = await apiGet(jobId);\nconst status = (r.data && r.data.status) || 'unknown';\nconst pct    = r.data && r.data.progress != null ? ' (' + r.data.progress + '%)' : '';\nconsole.log('Image -> ' + status + pct);\n\nlet imageUrl = data.image_url;\nlet all_done = 0;\nif (status === 'completed') {\n  imageUrl = r.data.outputs && r.data.outputs[0];\n  if (!imageUrl) throw new Error('Image completed but no output URL: ' + JSON.stringify(r.data).slice(0,300));\n  all_done = 1;\n  console.log('Image ready: ' + imageUrl.split('?')[0].slice(-40));\n} else if (status === 'failed') {\n  throw new Error('Seedream image FAILED: ' + JSON.stringify(r.data));\n}\n\nreturn [{ json: { ...data, image_url: imageUrl, poll_attempt: attempt, all_done } }];\n"
+      },
+      "id": "psych2-n5",
+      "name": "Check Seedream Job",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        980,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "psych2-alldone",
+              "leftValue": "={{ $json.all_done }}",
+              "rightValue": "1",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "psych2-n6",
+      "name": "Image Done?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1220,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const { execSync } = require('child_process');\nconst fs = require('fs');\nconst data  = $input.first().json;\nconst jobId = data.job_id;\nconst url   = data.image_url;\n\nif (!url) throw new Error('Missing image_url going into download');\n\nconst n8nPath  = '/data/manim/renders/' + jobId + '_seedream.png';\nconst contPath = '/ffmpeg/manim_renders/' + jobId + '_seedream.png';\n\n// file:// means the image is already on the shared volume — skip curl (which would truncate the file)\nif (url.startsWith('file://')) {\n  if (!fs.existsSync(n8nPath)) throw new Error('Pre-provided file not found: ' + n8nPath);\n  console.log('file:// bypass — existing file at ' + n8nPath + ' (' + fs.statSync(n8nPath).size + ' bytes)');\n} else {\n  console.log('Downloading Seedream image: ' + url.split('?')[0].slice(-60));\n  const cmd = 'docker exec qpc_ffmpeg_runner curl -sL -o \"' + contPath + '\" \"' + url + '\" && echo DL_OK';\n  const res = execSync(cmd, { encoding: 'utf-8', timeout: 60000 });\n  if (!res.includes('DL_OK')) throw new Error('Image download failed: ' + res.slice(-300));\n  if (!fs.existsSync(n8nPath)) throw new Error('File missing after download: ' + n8nPath);\n}\n\nconsole.log('Saved: ' + n8nPath);\nreturn [{ json: { ...data, seedream_image_path: n8nPath } }];\n"
+      },
+      "id": "psych2-n7",
+      "name": "Download Image",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1460,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nif (!data.job_id)              throw new Error('Missing job_id going into assembly');\nif (!data.seedream_image_path) throw new Error('Missing seedream_image_path going into assembly');\nif (!data.quote)               throw new Error('Missing quote going into assembly');\nreturn [{ json: {\n  job_id:              data.job_id,\n  philosopher:         data.philosopher || 'Unknown',\n  attribution:         data.attribution || data.philosopher || 'Unknown',\n  era:                 data.era || 'historical',\n  quote:               data.quote,\n  caption:             data.caption || '',\n  title:               data.title || data.philosopher,\n  hashtags:             data.hashtags || '#philosophy #psychology #aperture',\n  seedream_image_path: data.seedream_image_path,\n  bgm_path:            data.bgm_path || null,\n  sheet_row:           data.sheet_row || null,\n  start_time:          data.start_time || Date.now()\n}}];\n"
+      },
+      "id": "psych2-n7b",
+      "name": "Prepare for Assembly",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1700,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const { spawnSync, execSync } = require('child_process');\nconst data  = $input.first().json;\nconst jobId = data.job_id;\n\nconst config = JSON.stringify({\n  bg_path:     '/manim/renders/' + jobId + '_seedream.png',\n  output_path: '/manim/renders/' + jobId + '_quote.mp4',\n  quote:       data.quote,\n  attribution: data.attribution,\n  video_dur:   15,\n  fps:         30\n});\n\nconst tmpCfg = '/tmp/apr_cfg_' + Date.now() + '.json';\nconst write = spawnSync('docker', ['exec', '-i', 'qpc_manim_runner', 'bash', '-c', 'cat > ' + tmpCfg],\n  { input: config, encoding: 'utf-8', timeout: 10000 });\nif (write.status !== 0) throw new Error('Failed to write compositor config: ' + (write.stderr || ''));\n\nlet stdout;\ntry {\n  stdout = execSync(\n    'docker exec qpc_manim_runner python3 /manim/scripts/composite_aperture_quote.py ' + tmpCfg,\n    { encoding: 'utf-8', timeout: 300000 }\n  );\n} catch (e) {\n  throw new Error('Compositor failed: ' + ((e.stdout || '') + (e.stderr || '') || e.message).slice(0, 1000));\n}\n\ntry { execSync('docker exec qpc_manim_runner rm -f ' + tmpCfg, { timeout: 5000 }); } catch(_) {}\n\nif (!stdout.includes('OK:')) throw new Error('Compositor did not confirm OK:\\n' + stdout.slice(-500));\n\nconsole.log('Compositor output:\\n' + stdout.trim());\nreturn [{ json: { ...data, quote_video_path: '/data/manim/renders/' + jobId + '_quote.mp4' } }];\n"
+      },
+      "id": "psych2-n7c",
+      "name": "Run Compositor",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1940,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const { execSync } = require('child_process');\nconst fs = require('fs');\n\nconst data  = $input.first().json;\nconst jobId = data.job_id;\nconst VIDEO_DUR = 15;\nconst FPS = 30;\nconst FADE_DUR = 1.0;\n\nconst n8nOut  = '/data/ffmpeg/output';\nconst contOut = '/ffmpeg/output';\nif (!fs.existsSync(n8nOut)) fs.mkdirSync(n8nOut, { recursive: true });\n\nfunction run(cmd, ms) {\n  ms = ms || 120000;\n  console.log('CMD: ' + cmd.slice(0, 220));\n  let out = '';\n  try { out = execSync(cmd, { encoding: 'utf-8', timeout: ms }); }\n  catch(e) { out = (e.stdout||'') + (e.stderr||''); }\n  return out.toString();\n}\n\nconst imgFile = '/ffmpeg/manim_renders/' + jobId + '_quote.mp4';\nconst hasImg = run('docker exec qpc_ffmpeg_runner test -f \"' + imgFile + '\" && echo OK').includes('OK');\nif (!hasImg) throw new Error('Compositor video missing at ' + imgFile);\n\nlet bgmFile = data.bgm_path ? data.bgm_path.replace('/data/ffmpeg', '/ffmpeg') : null;\nconst hasBgm = !!(bgmFile && run('docker exec qpc_ffmpeg_runner test -f \"' + bgmFile + '\" && echo OK').includes('OK'));\nconsole.log('Assets | image:' + hasImg + ' | bgm:' + hasBgm);\n\n// Static image (no zoom/pan — zoompan was causing visible shake/tilt), just a\n// clean fade in from black at the start and fade out to black at the end.\nconst vf =\n  \"[0:v]fade=t=in:st=0:d=\" + FADE_DUR + \",fade=t=out:st=\" + (VIDEO_DUR - FADE_DUR) + \":d=\" + FADE_DUR + \"[outv]\";\n\nconst inp = ['-i \"' + imgFile + '\"'];\nlet amap = '-an';\nlet afull = '';\n\nif (hasBgm) {\n  inp.push('-i \"' + bgmFile + '\"');\n  afull = \";[1:a]atrim=0:\" + VIDEO_DUR + \",afade=t=in:st=0:d=\" + FADE_DUR + \",afade=t=out:st=\" + (VIDEO_DUR - FADE_DUR) + \":d=\" + FADE_DUR + \"[aout]\";\n  amap = '-map \"[aout]\" -c:a aac -b:a 192k';\n}\n\nconst fullFilter = vf + afull;\n\nconst cmd =\n  'docker exec qpc_ffmpeg_runner ffmpeg -y ' + inp.join(' ') +\n  ' -filter_complex \"' + fullFilter + '\" -map \"[outv]\" ' + amap +\n  ' -c:v libx264 -crf 18 -preset fast -pix_fmt yuv420p -movflags +faststart' +\n  ' -t ' + VIDEO_DUR + ' \"' + contOut + '/' + jobId + '_final.mp4\" && echo FINAL_OK';\n\nconst result = run(cmd, 300000);\nif (!result.includes('FINAL_OK')) throw new Error('Final render failed:\\n' + result.slice(-800));\n\nconst finalPath = n8nOut + '/' + jobId + '_final.mp4';\nif (!fs.existsSync(finalPath)) throw new Error('Output not on disk: ' + finalPath);\n\nconst elapsed = Math.round((Date.now() - data.start_time) / 1000);\nconsole.log('Assembly complete | ' + jobId + ' | ' + elapsed + 's | ' + finalPath);\n\nreturn [{ json: { ...data, final_video_path: finalPath, output_filename: jobId + '_final.mp4', assembly_time_sec: elapsed } }];\n"
+      },
+      "id": "psych2-n8",
+      "name": "Assemble Video",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2180,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst data = $input.first().json;\nconst filePath = data.final_video_path;\nif (!fs.existsSync(filePath)) throw new Error('Final video missing: ' + filePath);\nconst destDir = '/root/.n8n-files';\nif (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });\nconst destPath = destDir + '/' + data.output_filename;\nfs.copyFileSync(filePath, destPath);\nconsole.log('Copied final video into n8n-allowed path: ' + destPath);\nreturn [{ json: { ...data, n8n_file_path: destPath } }];\n"
+      },
+      "id": "psych2-n9pre",
+      "name": "Copy Video to Allowed Path",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2420,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "fileSelector": "={{ $json.n8n_file_path }}",
+        "options": {}
+      },
+      "id": "psych2-n9a",
+      "name": "Read Final Video File",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        2500,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "file",
+        "operation": "upload",
+        "name": "={{ $('Assemble Video').first().json.output_filename }}",
+        "folderId": {
+          "__rl": true,
+          "value": "1JPIb5HhuUC983NHBsHP6Yv2ZBIj73_Ng",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "id": "psych2-n9b",
+      "name": "Upload to Google Drive",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        2580,
+        0
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "dwOT4VyMlmKAS9om",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "file",
+        "operation": "share",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $json.id }}",
+          "mode": "id"
+        },
+        "permissionsUi": {
+          "permissionsValues": {
+            "role": "reader",
+            "type": "anyone"
+          }
+        },
+        "options": {}
+      },
+      "id": "psych2-n9c",
+      "name": "Make Drive File Public",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "continueOnFail": true,
+      "position": [
+        2660,
+        0
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "dwOT4VyMlmKAS9om",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const base = $('Assemble Video').first().json;\nlet driveJson = {};\ntry { driveJson = $('Upload to Google Drive').first().json; } catch(e) {}\nconst fileId = driveJson.id || null;\nconst driveUrl = fileId ? ('https://drive.usercontent.google.com/download?id=' + fileId + '&export=download') : null;\nconsole.log('Drive: ' + (fileId ? 'OK -> ' + fileId : 'upload did not return an id'));\nreturn [{ json: { ...base, drive_file_id: fileId, drive_video_url: driveUrl } }];\n"
+      },
+      "id": "psych2-n9d",
+      "name": "Merge Drive Info",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2740,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nconst totalSec = Math.round((Date.now() - (data.start_time||Date.now())) / 1000);\nconsole.log('=== APERTURE STAGE 2 COMPLETE (quote image gen + assembly + drive) ===');\nconsole.log('Job:         ' + data.job_id);\nconsole.log('Philosopher: ' + data.philosopher);\nconsole.log('Quote:       ' + (data.quote||'').slice(0,60));\nconsole.log('File:        ' + data.final_video_path);\nconsole.log('Drive:       ' + (data.drive_file_id || 'not uploaded'));\nconsole.log('Time:        ' + totalSec + 's');\nreturn [{ json: {\n  job_id:           data.job_id,\n  title:            data.title,\n  philosopher:      data.philosopher,\n  quote:            data.quote,\n  caption:          data.caption,\n  hashtags:         data.hashtags,\n  drive_video_url:  data.drive_video_url || null,\n  final_video_path: data.final_video_path,\n  output_filename:  data.output_filename,\n  drive_file_id:    data.drive_file_id  || null,\n  sheet_row:        data.sheet_row,\n  total_time_sec:   totalSec,\n  status:           'stage2_complete'\n}}];\n"
+      },
+      "id": "psych2-n10",
+      "name": "Build Final Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2820,
+        -20
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ 'https://sheets.googleapis.com/v4/spreadsheets/1VD-F6Wj47Dm_5Uo_zdIEuxOnqprepCPRTKEmTYs6mFs/values/Aperture%20Topics!B' + $json.sheet_row + '?valueInputOption=USER_ENTERED' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ majorDimension: 'ROWS', values: [['DONE']] }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "psych2-n11",
+      "name": "Mark DONE in Sheet",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "continueOnFail": true,
+      "position": [
+        3060,
+        -80
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "wUDvDA62yzWuxKP9",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://sheets.googleapis.com/v4/spreadsheets/1VD-F6Wj47Dm_5Uo_zdIEuxOnqprepCPRTKEmTYs6mFs/values/Aperture%20Video%20Queue!A:N:append?valueInputOption=USER_ENTERED",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ majorDimension: 'ROWS', values: [[ $json.job_id, $json.philosopher, 'Ready to Post', $json.drive_video_url || '', $json.title, $json.hashtags || '', $json.quote || '', $json.caption || '', '', '', '', '', '', '' ]] }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "psych2-n12",
+      "name": "Add to Video Queue",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "continueOnFail": true,
+      "position": [
+        3060,
+        80
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "wUDvDA62yzWuxKP9",
+          "name": "Google Sheets account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Extract & Prepare",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stage 2 Webhook": {
+      "main": [
+        [
+          {
+            "node": "Extract & Prepare",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract & Prepare": {
+      "main": [
+        [
+          {
+            "node": "Submit Seedream Image Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Submit Seedream Image Job": {
+      "main": [
+        [
+          {
+            "node": "Wait 15 Seconds",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 15 Seconds": {
+      "main": [
+        [
+          {
+            "node": "Check Seedream Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Seedream Job": {
+      "main": [
+        [
+          {
+            "node": "Image Done?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Image Done?": {
+      "main": [
+        [
+          {
+            "node": "Download Image",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait 15 Seconds",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Image": {
+      "main": [
+        [
+          {
+            "node": "Prepare for Assembly",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare for Assembly": {
+      "main": [
+        [
+          {
+            "node": "Run Compositor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Compositor": {
+      "main": [
+        [
+          {
+            "node": "Assemble Video",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assemble Video": {
+      "main": [
+        [
+          {
+            "node": "Copy Video to Allowed Path",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Copy Video to Allowed Path": {
+      "main": [
+        [
+          {
+            "node": "Read Final Video File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Final Video File": {
+      "main": [
+        [
+          {
+            "node": "Upload to Google Drive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload to Google Drive": {
+      "main": [
+        [
+          {
+            "node": "Make Drive File Public",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Make Drive File Public": {
+      "main": [
+        [
+          {
+            "node": "Merge Drive Info",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Drive Info": {
+      "main": [
+        [
+          {
+            "node": "Build Final Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Final Summary": {
+      "main": [
+        [
+          {
+            "node": "Mark DONE in Sheet",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Add to Video Queue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "id": "psych-stage2-video-gen"
+}
