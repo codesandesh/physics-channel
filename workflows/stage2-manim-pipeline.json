@@ -64,7 +64,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1536,
+        2736,
         304
       ]
     },
@@ -77,7 +77,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1760,
+        2960,
         304
       ]
     },
@@ -104,7 +104,7 @@
       "type": "n8n-nodes-base.googleDrive",
       "typeVersion": 3,
       "position": [
-        1984,
+        3184,
         304
       ],
       "credentials": {
@@ -142,7 +142,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        2208,
+        3408,
         304
       ],
       "credentials": {
@@ -161,7 +161,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2432,
+        3632,
         304
       ]
     },
@@ -183,7 +183,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        2640,
+        3840,
         304
       ],
       "credentials": {
@@ -203,20 +203,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2864,
-        304
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "const { execSync } = require('child_process');\nconst fs = require('fs');\n\nconst items = $input.all().map(item => item.json);\n\nconst n8nClipDir  = '/data/ffmpeg/clips';\nconst contClipDir = '/ffmpeg/clips';\nconst TRANS = 0.3;\n\nfunction shuffle(arr) {\n  for (let i = arr.length - 1; i > 0; i--) {\n    const j = Math.floor(Math.random() * (i + 1));\n    [arr[i], arr[j]] = [arr[j], arr[i]];\n  }\n  return arr;\n}\n\nfunction getClipDuration(contPath) {\n  try {\n    const out = execSync(\n      'docker exec phys_ffmpeg_runner ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 \"' + contPath + '\"',\n      { encoding: 'utf8', timeout: 10000 }\n    ).trim();\n    const d = parseFloat(out);\n    return (d > 0.5) ? d : 5.0;\n  } catch(e) {\n    return 5.0;\n  }\n}\n\nconst allClipFiles = fs.readdirSync(n8nClipDir).filter(f => f.endsWith('_norm.mp4'));\nif (allClipFiles.length === 0) throw new Error('No _norm.mp4 clips found in ' + n8nClipDir);\n\nreturn items.map(data => {\n  const targetDur = data.audio_duration || 19.1;\n  const candidates = shuffle([...allClipFiles]);\n\n  const selected = [];\n  const durations = [];\n  let assembled = 0;\n\n  for (let i = 0; i < candidates.length && assembled < targetDur; i++) {\n    const contPath = contClipDir + '/' + candidates[i];\n    const dur = getClipDuration(contPath);\n    if (dur < 1.0) continue;\n    selected.push(contPath);\n    durations.push(dur);\n    assembled += (selected.length > 1) ? (dur - TRANS) : dur;\n  }\n\n  if (selected.length === 0) throw new Error('Job ' + data.job_id + ': could not pick any clips');\n\n  console.log('Job ' + data.job_id + ': picked ' + selected.length + ' clips, assembled ~' + assembled.toFixed(2) + 's (target ' + targetDur + 's)');\n  selected.forEach((p, i) => console.log('  clip' + i + ': ' + p.split('/').pop() + ' (' + durations[i].toFixed(2) + 's)'));\n\n  return { json: {\n    ...data,\n    video_paths: selected,\n    clip_durations: durations,\n    clips_count: selected.length,\n    clip_source: 'library'\n  }};\n});"
-      },
-      "id": "nodeSubmit",
-      "name": "Pick Random Clips from Library",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        672,
+        4064,
         304
       ]
     },
@@ -236,7 +223,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
       "position": [
-        3760,
+        4960,
         300
       ]
     },
@@ -246,7 +233,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        1800,
+        3000,
         300
       ],
       "credentials": {
@@ -266,6 +253,125 @@
         "options": {}
       },
       "continueOnFail": true
+    },
+    {
+      "id": "list-drive-clips",
+      "name": "List Drive Clips",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        672,
+        304
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "https://www.googleapis.com/drive/v3/files",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleDriveOAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "'1kNUn1voUp2AZCXeG0yc68OF5U3Bx5Me_' in parents and trashed=false"
+            },
+            {
+              "name": "fields",
+              "value": "files(id,name)"
+            },
+            {
+              "name": "pageSize",
+              "value": "100"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "dwOT4VyMlmKAS9om",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "id": "pick-random-drive-files",
+      "name": "Pick Random Drive Files",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        304
+      ],
+      "parameters": {
+        "jsCode": "const driveFiles = $('List Drive Clips').item.json.files || [];\nif (!driveFiles.length) throw new Error('No files found in Drive folder');\n\nconst data = $('Extract Payload').item.json;\n\nfunction shuffle(arr) {\n  const a = [...arr];\n  for (let i = a.length - 1; i > 0; i--) {\n    const j = Math.floor(Math.random() * (i + 1));\n    [a[i], a[j]] = [a[j], a[i]];\n  }\n  return a;\n}\n\nconst shuffled = shuffle(driveFiles).slice(0, 10);\nconsole.log('Picked ' + shuffled.length + ' random files from Drive for job ' + data.job_id);\n\nreturn shuffled.map(f => ({ json: { fileId: f.id, fileName: f.name, jobData: data } }));"
+      }
+    },
+    {
+      "id": "download-drive-clip",
+      "name": "Download Drive Clip",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        1120,
+        304
+      ],
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $json.fileId }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "dwOT4VyMlmKAS9om",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "id": "save-clip-to-local",
+      "name": "Save Clip to Local",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        304
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const fs = require('fs');\nconst { execSync } = require('child_process');\n\nconst fileName = $input.item.json.fileName;\nconst jobData = $input.item.json.jobData;\n\nconst clipName = fileName.endsWith('_norm.mp4') ? fileName : fileName.replace(/\\.[^.]+$/, '') + '_norm.mp4';\nconst localPath = '/data/ffmpeg/clips/' + clipName;\nconst contPath  = '/ffmpeg/clips/' + clipName;\n\nconst buf = await this.helpers.getBinaryDataBuffer($input.item, 'data');\nfs.writeFileSync(localPath, buf);\n\nlet duration = 5.0;\ntry {\n  const out = execSync(\n    'docker exec phys_ffmpeg_runner ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 \"' + contPath + '\"',\n    { encoding: 'utf8', timeout: 15000 }\n  ).trim();\n  const d = parseFloat(out);\n  if (d > 0.5) duration = d;\n} catch(e) { console.log('ffprobe failed for ' + clipName + ': ' + e.message); }\n\nconsole.log('Saved: ' + clipName + ' (' + duration.toFixed(2) + 's)');\nreturn { json: { contPath, duration, clipName, jobData } };"
+      }
+    },
+    {
+      "id": "aggregate-clips",
+      "name": "Aggregate Clips",
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        1568,
+        304
+      ],
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "options": {}
+      }
+    },
+    {
+      "id": "build-clip-paths",
+      "name": "Build Clip Paths",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1792,
+        304
+      ],
+      "parameters": {
+        "jsCode": "const items = $input.first().json.data || [];\nif (!items.length) throw new Error('No clips downloaded from Drive');\n\nconst jobData = items[0].jobData;\nconst TRANS = 0.3;\nconst targetDur = jobData.audio_duration || 19.1;\n\nlet assembled = 0;\nconst selected = [];\nconst durations = [];\n\nfor (const item of items) {\n  if (assembled >= targetDur) break;\n  selected.push(item.contPath);\n  durations.push(item.duration);\n  assembled += selected.length > 1 ? (item.duration - TRANS) : item.duration;\n}\n\nif (!selected.length) throw new Error('No clips could be selected for job ' + jobData.job_id);\n\nconsole.log('Job ' + jobData.job_id + ': ' + selected.length + ' clips, ~' + assembled.toFixed(2) + 's (target ' + targetDur + 's)');\n\nreturn [{ json: {\n  ...jobData,\n  video_paths: selected,\n  clip_durations: durations,\n  clips_count: selected.length,\n  clip_source: 'google_drive'\n}}];"
+      }
     }
   ],
   "pinData": {},
@@ -307,18 +413,7 @@
       "main": [
         [
           {
-            "node": "Pick Random Clips from Library",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Pick Random Clips from Library": {
-      "main": [
-        [
-          {
-            "node": "Assemble Video",
+            "node": "List Drive Clips",
             "type": "main",
             "index": 0
           }
@@ -407,6 +502,72 @@
         [
           {
             "node": "Trigger Stage1 Refill",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List Drive Clips": {
+      "main": [
+        [
+          {
+            "node": "Pick Random Drive Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pick Random Drive Files": {
+      "main": [
+        [
+          {
+            "node": "Download Drive Clip",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Drive Clip": {
+      "main": [
+        [
+          {
+            "node": "Save Clip to Local",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Clip to Local": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Clips",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Clips": {
+      "main": [
+        [
+          {
+            "node": "Build Clip Paths",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Clip Paths": {
+      "main": [
+        [
+          {
+            "node": "Assemble Video",
             "type": "main",
             "index": 0
           }
