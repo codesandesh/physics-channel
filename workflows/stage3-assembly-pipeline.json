@@ -404,10 +404,10 @@
     },
     {
       "parameters": {
-        "jsCode": "const https = require('https');\nconst data = $input.first().json;\n\nconst apiKey = $env.AYRSHARE_API_KEY;\nif (!apiKey) throw new Error('AYRSHARE_API_KEY not set');\n\nconst videoUrl = 'https://drive.google.com/uc?export=download&id=' + data.drive_file_id + '&confirm=t';\nconst caption  = ((data.instagram_caption || data.title || data.topic || '') + '\\n\\n' + (data.generated_hashtags || '')).slice(0, 2190);\n\nconst postBody = JSON.stringify({\n  post: caption,\n  platforms: ['instagram', 'tiktok'],\n  mediaUrls: [videoUrl],\n  instagramOptions: { reels: true },\n  socialAccounts: [\n    { platform: 'instagram', id: $env.AYRSHARE_PHYSICS_IG_PROFILE_ID },\n    { platform: 'tiktok',    id: $env.AYRSHARE_PHYSICS_TIKTOK_PROFILE_ID }\n  ]\n});\n\nconst result = await new Promise((resolve, reject) => {\n  const buf = Buffer.from(postBody);\n  const req = https.request({\n    hostname: 'app.ayrshare.com',\n    path: '/api/post',\n    method: 'POST',\n    headers: {\n      'Authorization': 'Bearer ' + apiKey,\n      'Content-Type': 'application/json',\n      'Content-Length': buf.length\n    }\n  }, res => {\n    let d = ''; res.on('data', c => d += c);\n    res.on('end', () => { try { resolve(JSON.parse(d)); } catch(e) { reject(new Error('Non-JSON: ' + d.slice(0,200))); } });\n  });\n  req.on('error', reject);\n  req.write(buf); req.end();\n});\n\nconsole.log('Ayrshare result:', JSON.stringify(result).slice(0, 300));\nif (result.status === 'error') throw new Error('Ayrshare error: ' + (result.message || JSON.stringify(result)));\n\nreturn [{ json: { ...data, ayrshare_ig_url: result.postIds?.find(p=>p.platform==='instagram')?.postUrl || '', ayrshare_tiktok_url: result.postIds?.find(p=>p.platform==='tiktok')?.postUrl || '' } }];"
+        "jsCode": "const https = require('https');\nconst data = $input.first().json;\n\nconst apiKey = $env.POSTFORME_API_KEY;\nif (!apiKey) throw new Error('POSTFORME_API_KEY not set');\n\nconst videoUrl = 'https://drive.google.com/uc?export=download&id=' + data.drive_file_id + '&confirm=t';\nconst caption  = ((data.instagram_caption || data.title || data.topic || '') + '\\n\\n' + (data.generated_hashtags || '')).slice(0, 2190);\n\nconst postBody = JSON.stringify({\n  caption: caption,\n  social_accounts: [$env.POSTFORME_PHYSICS_IG_ACCOUNT_ID, $env.POSTFORME_PHYSICS_TIKTOK_ACCOUNT_ID],\n  media: [{ url: videoUrl }]\n});\n\nconst result = await new Promise((resolve, reject) => {\n  const buf = Buffer.from(postBody);\n  const req = https.request({\n    hostname: 'api.postforme.dev',\n    path: '/v1/social-posts',\n    method: 'POST',\n    headers: {\n      'Authorization': 'Bearer ' + apiKey,\n      'Content-Type': 'application/json',\n      'Content-Length': buf.length\n    }\n  }, res => {\n    let d = ''; res.on('data', c => d += c);\n    res.on('end', () => { try { resolve(JSON.parse(d)); } catch(e) { reject(new Error('Non-JSON: ' + d.slice(0,200))); } });\n  });\n  req.on('error', reject);\n  req.write(buf); req.end();\n});\n\nconsole.log('PostForMe result:', JSON.stringify(result).slice(0, 300));\nif (result.status === 'error') throw new Error('PostForMe error: ' + (result.message || JSON.stringify(result)));\n\nreturn [{ json: { ...data, postforme_ig_url: result.postIds?.find(p=>p.platform==='instagram')?.postUrl || '', postforme_tiktok_url: result.postIds?.find(p=>p.platform==='tiktok')?.postUrl || '' } }];"
       },
       "id": "s3-ayrshare-001",
-      "name": "Post to Ayrshare (IG + TikTok)",
+      "name": "Post to PostForMe (IG + TikTok)",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
@@ -543,7 +543,7 @@
             "index": 0
           },
           {
-            "node": "Post to Ayrshare (IG + TikTok)",
+            "node": "Post to PostForMe (IG + TikTok)",
             "type": "main",
             "index": 0
           }
@@ -630,7 +630,7 @@
         ]
       ]
     },
-    "Post to Ayrshare (IG + TikTok)": {
+    "Post to PostForMe (IG + TikTok)": {
       "main": [
         [
           {

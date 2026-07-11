@@ -425,8 +425,8 @@
       }
     },
     {
-      "id": "qpc2-reel-ayrshare-v2",
-      "name": "Post Reel to Ayrshare",
+      "id": "qpc2-reel-postforme-v1",
+      "name": "Post Reel to PostForMe",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
@@ -435,7 +435,7 @@
       ],
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const https = require('https');\nconst data  = $input.item.json;\n\nconst apiKey   = $env.AYRSHARE_API_KEY;\nconst driveId  = data.id || $('Upload Reel to Drive').item.json.id;\nif (!apiKey)   throw new Error('AYRSHARE_API_KEY not set');\nif (!driveId)  throw new Error('reel_drive_file_id not found — Drive upload failed');\n\nconst videoUrl = 'https://drive.google.com/uc?export=download&id=' + driveId + '&confirm=t';\nconst caption  = ((data.instagram_caption || '') + '\\n\\n' + (data.tiktok_caption || '')).slice(0, 2190);\n\nconst postBody = JSON.stringify({\n  post: caption,\n  platforms: ['instagram', 'tiktok'],\n  mediaUrls: [videoUrl],\n  instagramOptions: { reels: true },\n  socialAccounts: [\n    { platform: 'instagram', id: $env.AYRSHARE_PHYSICS_IG_PROFILE_ID },\n    { platform: 'tiktok',    id: $env.AYRSHARE_PHYSICS_TIKTOK_PROFILE_ID }\n  ]\n});\n\nconst result = await new Promise((resolve, reject) => {\n  const buf = Buffer.from(postBody);\n  const req = https.request({ hostname: 'app.ayrshare.com', path: '/api/post', method: 'POST',\n    headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json', 'Content-Length': buf.length }\n  }, res => { let d=''; res.on('data',c=>d+=c); res.on('end',()=>{ try{resolve(JSON.parse(d));}catch(e){reject(new Error('Non-JSON: '+d.slice(0,200)));} }); });\n  req.on('error', reject); req.write(buf); req.end();\n});\n\nconsole.log('Ayrshare reel result:', JSON.stringify(result).slice(0, 300));\nif (result.status === 'error') throw new Error('Ayrshare error: ' + (result.message || JSON.stringify(result)));\n\nreturn [{ json: { ...data, ayrshare_ig_url: result.postIds?.find(p=>p.platform==='instagram')?.postUrl || '', ayrshare_tiktok_url: result.postIds?.find(p=>p.platform==='tiktok')?.postUrl || '' } }];"
+        "jsCode": "const https = require('https');\nconst data  = $input.item.json;\n\nconst apiKey  = $env.POSTFORME_API_KEY;\nconst driveId = data.id || $('Upload Reel to Drive').item.json.id;\nif (!apiKey)  throw new Error('POSTFORME_API_KEY not set');\nif (!driveId) throw new Error('reel_drive_file_id not found — Drive upload failed');\n\nconst videoUrl = 'https://drive.google.com/uc?export=download&id=' + driveId + '&confirm=t';\nconst caption  = ((data.instagram_caption || '') + '\\n\\n' + (data.tiktok_caption || '')).slice(0, 2190);\n\nconst postBody = JSON.stringify({\n  caption: caption,\n  social_accounts: [$env.POSTFORME_PHYSICS_IG_ACCOUNT_ID, $env.POSTFORME_PHYSICS_TIKTOK_ACCOUNT_ID],\n  media: [{ url: videoUrl }]\n});\n\nconst result = await new Promise((resolve, reject) => {\n  const buf = Buffer.from(postBody);\n  const req = https.request({ hostname: 'api.postforme.dev', path: '/v1/social-posts', method: 'POST',\n    headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json', 'Content-Length': buf.length }\n  }, res => { let d=''; res.on('data',c=>d+=c); res.on('end',()=>{ try{resolve(JSON.parse(d));}catch(e){reject(new Error('Non-JSON: '+d.slice(0,200)));} }); });\n  req.on('error', reject); req.write(buf); req.end();\n});\n\nconsole.log('PostForMe reel result:', JSON.stringify(result).slice(0, 300));\nif (result.status === 'error') throw new Error('PostForMe error: ' + (result.message || JSON.stringify(result)));\n\nreturn [{ json: { ...data, postforme_ig_url: result.postIds?.find(p=>p.platform==='instagram')?.postUrl || '', postforme_tiktok_url: result.postIds?.find(p=>p.platform==='tiktok')?.postUrl || '' } }];"
       }
     }
   ],
@@ -640,14 +640,14 @@
       "main": [
         [
           {
-            "node": "Post Reel to Ayrshare",
+            "node": "Post Reel to PostForMe",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Post Reel to Ayrshare": {
+    "Post Reel to PostForMe": {
       "main": [
         [
           {
@@ -1099,8 +1099,8 @@
         }
       },
       {
-        "id": "qpc2-reel-ayrshare-v2",
-        "name": "Post Reel to Ayrshare",
+        "id": "qpc2-reel-postforme-v1",
+        "name": "Post Reel to PostForMe",
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
         "position": [
@@ -1109,7 +1109,7 @@
         ],
         "parameters": {
           "mode": "runOnceForEachItem",
-          "jsCode": "const https = require('https');\nconst data  = $input.item.json;\n\nconst apiKey   = $env.AYRSHARE_API_KEY;\nconst driveId  = data.id || $('Upload Reel to Drive').item.json.id;\nif (!apiKey)   throw new Error('AYRSHARE_API_KEY not set');\nif (!driveId)  throw new Error('reel_drive_file_id not found — Drive upload failed');\n\nconst videoUrl = 'https://drive.google.com/uc?export=download&id=' + driveId + '&confirm=t';\nconst caption  = ((data.instagram_caption || '') + '\\n\\n' + (data.tiktok_caption || '')).slice(0, 2190);\n\nconst postBody = JSON.stringify({\n  post: caption,\n  platforms: ['instagram', 'tiktok'],\n  mediaUrls: [videoUrl],\n  instagramOptions: { reels: true },\n  socialAccounts: [\n    { platform: 'instagram', id: $env.AYRSHARE_PHYSICS_IG_PROFILE_ID },\n    { platform: 'tiktok',    id: $env.AYRSHARE_PHYSICS_TIKTOK_PROFILE_ID }\n  ]\n});\n\nconst result = await new Promise((resolve, reject) => {\n  const buf = Buffer.from(postBody);\n  const req = https.request({ hostname: 'app.ayrshare.com', path: '/api/post', method: 'POST',\n    headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json', 'Content-Length': buf.length }\n  }, res => { let d=''; res.on('data',c=>d+=c); res.on('end',()=>{ try{resolve(JSON.parse(d));}catch(e){reject(new Error('Non-JSON: '+d.slice(0,200)));} }); });\n  req.on('error', reject); req.write(buf); req.end();\n});\n\nconsole.log('Ayrshare reel result:', JSON.stringify(result).slice(0, 300));\nif (result.status === 'error') throw new Error('Ayrshare error: ' + (result.message || JSON.stringify(result)));\n\nreturn [{ json: { ...data, ayrshare_ig_url: result.postIds?.find(p=>p.platform==='instagram')?.postUrl || '', ayrshare_tiktok_url: result.postIds?.find(p=>p.platform==='tiktok')?.postUrl || '' } }];"
+          "jsCode": "const https = require('https');\nconst data  = $input.item.json;\n\nconst apiKey  = $env.POSTFORME_API_KEY;\nconst driveId = data.id || $('Upload Reel to Drive').item.json.id;\nif (!apiKey)  throw new Error('POSTFORME_API_KEY not set');\nif (!driveId) throw new Error('reel_drive_file_id not found — Drive upload failed');\n\nconst videoUrl = 'https://drive.google.com/uc?export=download&id=' + driveId + '&confirm=t';\nconst caption  = ((data.instagram_caption || '') + '\\n\\n' + (data.tiktok_caption || '')).slice(0, 2190);\n\nconst postBody = JSON.stringify({\n  caption: caption,\n  social_accounts: [$env.POSTFORME_PHYSICS_IG_ACCOUNT_ID, $env.POSTFORME_PHYSICS_TIKTOK_ACCOUNT_ID],\n  media: [{ url: videoUrl }]\n});\n\nconst result = await new Promise((resolve, reject) => {\n  const buf = Buffer.from(postBody);\n  const req = https.request({ hostname: 'api.postforme.dev', path: '/v1/social-posts', method: 'POST',\n    headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json', 'Content-Length': buf.length }\n  }, res => { let d=''; res.on('data',c=>d+=c); res.on('end',()=>{ try{resolve(JSON.parse(d));}catch(e){reject(new Error('Non-JSON: '+d.slice(0,200)));} }); });\n  req.on('error', reject); req.write(buf); req.end();\n});\n\nconsole.log('PostForMe reel result:', JSON.stringify(result).slice(0, 300));\nif (result.status === 'error') throw new Error('PostForMe error: ' + (result.message || JSON.stringify(result)));\n\nreturn [{ json: { ...data, postforme_ig_url: result.postIds?.find(p=>p.platform==='instagram')?.postUrl || '', postforme_tiktok_url: result.postIds?.find(p=>p.platform==='tiktok')?.postUrl || '' } }];"
         }
       }
     ],
@@ -1314,14 +1314,14 @@
         "main": [
           [
             {
-              "node": "Post Reel to Ayrshare",
+              "node": "Post Reel to PostForMe",
               "type": "main",
               "index": 0
             }
           ]
         ]
       },
-      "Post Reel to Ayrshare": {
+      "Post Reel to PostForMe": {
         "main": [
           [
             {
