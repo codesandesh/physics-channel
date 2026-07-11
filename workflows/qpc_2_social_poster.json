@@ -145,66 +145,6 @@
     },
     {
       "parameters": {
-        "method": "POST",
-        "url": "https://hook.eu1.make.com/2e6stpadypt34sjkhupvrk2czdgfilek",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            }
-          ]
-        },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ title: $('Clean Captions').item.json.headline, linkedin_caption: $('Clean Captions').item.json.linkedin_caption, media_url: $('Clean Captions').item.json.drive_url }) }}",
-        "options": {
-          "timeout": 60000
-        }
-      },
-      "id": "s6",
-      "name": "Make: LinkedIn Post",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.1,
-      "position": [
-        1120,
-        100
-      ],
-      "continueOnFail": true
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "https://hook.eu1.make.com/afl86f9h3471p6942yucl7qnjlgk3qro",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            }
-          ]
-        },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ post_type: 'image', media_url: $json.drive_url, title: $json.headline || '', linkedin_caption: $json.linkedin_caption, instagram_caption: $json.instagram_caption, tiktok_caption: $json.tiktok_caption, twitter_caption: $json.tiktok_caption }) }}",
-        "options": {
-          "timeout": 60000
-        }
-      },
-      "id": "make-multi-post",
-      "name": "Make: Multi-Platform Post",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4,
-      "position": [
-        680,
-        200
-      ],
-      "continueOnFail": true
-    },
-    {
-      "parameters": {
         "respondWith": "json",
         "responseBody": "={ \"status\": \"posted\", \"platforms\": [\"facebook\", \"linkedin\", \"instagram\", \"tiktok\"] }"
       },
@@ -485,11 +425,6 @@
             "node": "Download Image from Drive",
             "type": "main",
             "index": 0
-          },
-          {
-            "node": "Make: Multi-Platform Post",
-            "type": "main",
-            "index": 0
           }
         ]
       ]
@@ -514,28 +449,7 @@
             "index": 0
           },
           {
-            "node": "Make: LinkedIn Post",
-            "type": "main",
-            "index": 0
-          },
-          {
             "node": "Create IG Reel Video",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Make: LinkedIn Post": {
-      "main": [
-        [
-          {
-            "node": "Respond to Webhook",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "Check Has Row",
             "type": "main",
             "index": 0
           }
