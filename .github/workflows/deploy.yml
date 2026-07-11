@@ -29,7 +29,8 @@ jobs:
               git clone https://oauth2:${{ secrets.GH_DEPLOY_TOKEN }}@github.com/scale-build-ai/quantum-physics-channel.git "$DEPLOY_DIR"
               [ -f /home/physics-deploy/.env.backup ] && cp /home/physics-deploy/.env.backup "$DEPLOY_DIR/.env"
             else
-              git -C "$DEPLOY_DIR" pull origin main
+              git -C "$DEPLOY_DIR" fetch origin
+              git -C "$DEPLOY_DIR" reset --hard origin/main
             fi
 
             cd "$DEPLOY_DIR"
