@@ -35,7 +35,7 @@
         "method": "GET",
         "url": "https://sheets.googleapis.com/v4/spreadsheets/1VD-F6Wj47Dm_5Uo_zdIEuxOnqprepCPRTKEmTYs6mFs/values/Content%20Master%20Table!A4:O",
         "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "nodeCredentialType": "googleDriveOAuth2Api",
         "options": {
           "timeout": 10000
         }
@@ -49,9 +49,9 @@
         0
       ],
       "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "wUDvDA62yzWuxKP9",
-          "name": "Google Sheets account (new)"
+        "googleDriveOAuth2Api": {
+          "id": "lTPBYO6mXOO43KmE",
+          "name": "Google Drive account (new)"
         }
       }
     },
@@ -73,7 +73,7 @@
         "method": "PUT",
         "url": "={{ 'https://sheets.googleapis.com/v4/spreadsheets/1VD-F6Wj47Dm_5Uo_zdIEuxOnqprepCPRTKEmTYs6mFs/values/Content%20Master%20Table!L' + $json.sheet_row + '?valueInputOption=USER_ENTERED' }}",
         "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "nodeCredentialType": "googleDriveOAuth2Api",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ majorDimension: \"ROWS\", values: [[\"IN_PROGRESS\"]] }) }}",
@@ -91,9 +91,9 @@
         0
       ],
       "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "wUDvDA62yzWuxKP9",
-          "name": "Google Sheets account (new)"
+        "googleDriveOAuth2Api": {
+          "id": "lTPBYO6mXOO43KmE",
+          "name": "Google Drive account (new)"
         }
       }
     },
@@ -207,7 +207,7 @@
         "method": "POST",
         "url": "https://sheets.googleapis.com/v4/spreadsheets/1VD-F6Wj47Dm_5Uo_zdIEuxOnqprepCPRTKEmTYs6mFs/values/Video%20Production%20Queue!A:L:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS",
         "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "nodeCredentialType": "googleDriveOAuth2Api",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ values: [[ $json.job_id, $json.topic, $json.title, 'READY_FOR_VIDEO', $json.payload_json, '', '', $json.hashtags, $json.sheet_row, $json.readyForVideoAt, '', '' ]] }) }}",
@@ -222,9 +222,9 @@
         0
       ],
       "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "wUDvDA62yzWuxKP9",
-          "name": "Google Sheets account (new)"
+        "googleDriveOAuth2Api": {
+          "id": "lTPBYO6mXOO43KmE",
+          "name": "Google Drive account (new)"
         }
       }
     },
@@ -233,7 +233,7 @@
         "method": "PUT",
         "url": "={{ 'https://sheets.googleapis.com/v4/spreadsheets/1VD-F6Wj47Dm_5Uo_zdIEuxOnqprepCPRTKEmTYs6mFs/values/Content%20Master%20Table!L' + $('Set Job Config').first().json.sheet_row + '?valueInputOption=USER_ENTERED' }}",
         "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "nodeCredentialType": "googleDriveOAuth2Api",
         "sendBody": true,
         "options": {
           "timeout": 10000
@@ -251,9 +251,9 @@
         0
       ],
       "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "wUDvDA62yzWuxKP9",
-          "name": "Google Sheets account (new)"
+        "googleDriveOAuth2Api": {
+          "id": "lTPBYO6mXOO43KmE",
+          "name": "Google Drive account (new)"
         }
       }
     },

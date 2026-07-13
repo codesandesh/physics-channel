@@ -170,7 +170,7 @@
         "method": "PUT",
         "url": "={{ 'https://sheets.googleapis.com/v4/spreadsheets/1VD-F6Wj47Dm_5Uo_zdIEuxOnqprepCPRTKEmTYs6mFs/values/Content%20Master%20Table!L' + $json.sheet_row + '?valueInputOption=RAW' }}",
         "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "nodeCredentialType": "googleDriveOAuth2Api",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ majorDimension: \"ROWS\", values: [[\"STAGE2_COMPLETE\"]] }) }}",
@@ -187,9 +187,9 @@
         304
       ],
       "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "wUDvDA62yzWuxKP9",
-          "name": "Google Sheets account (new)"
+        "googleDriveOAuth2Api": {
+          "id": "lTPBYO6mXOO43KmE",
+          "name": "Google Drive account (new)"
         }
       },
       "continueOnFail": true
@@ -237,16 +237,16 @@
         300
       ],
       "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "wUDvDA62yzWuxKP9",
-          "name": "Google Sheets account (new)"
+        "googleDriveOAuth2Api": {
+          "id": "lTPBYO6mXOO43KmE",
+          "name": "Google Drive account (new)"
         }
       },
       "parameters": {
         "method": "PUT",
         "url": "={{ 'https://sheets.googleapis.com/v4/spreadsheets/1VD-F6Wj47Dm_5Uo_zdIEuxOnqprepCPRTKEmTYs6mFs/values/Video%20Production%20Queue!D' + $json.queue_row_index + ':G' + $json.queue_row_index + '?valueInputOption=RAW' }}",
         "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "nodeCredentialType": "googleDriveOAuth2Api",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ majorDimension: \"ROWS\", values: [[\"READY_TO_PUBLISH\", \"\", $json.drive_file_id || \"\", $json.video_url || $json.drive_video_url || \"\"]] }) }}",
