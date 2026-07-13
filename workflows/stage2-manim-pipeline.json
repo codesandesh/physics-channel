@@ -308,56 +308,16 @@
       }
     },
     {
-      "id": "download-drive-clip",
-      "name": "Download Drive Clip",
-      "type": "n8n-nodes-base.googleDrive",
-      "typeVersion": 3,
+      "id": "download-clips-drive",
+      "name": "Download Clips from Drive",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
       "position": [
         1120,
         304
       ],
       "parameters": {
-        "operation": "download",
-        "fileId": {
-          "__rl": true,
-          "value": "={{ $json.fileId }}",
-          "mode": "id"
-        },
-        "options": {}
-      },
-      "credentials": {
-        "googleDriveOAuth2Api": {
-          "id": "lTPBYO6mXOO43KmE",
-          "name": "Google Drive account"
-        }
-      }
-    },
-    {
-      "id": "write-clip-to-disk",
-      "name": "Write Clip to Disk",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1344,
-        304
-      ],
-      "parameters": {
-        "mode": "runOnceForEachItem",
-        "jsCode": "const fs = require('fs');\nconst prev = $('Pick Random Drive Files').item.json;\nconst jobId = prev.jobData.job_id;\nconst fileId = prev.fileId;\nconst clipName = jobId + '_' + fileId + '.mp4';\nconst localPath = '/data/ffmpeg/input/' + clipName;\nconst buf = await this.helpers.getBinaryDataBuffer($input.item, 'data');\nfs.writeFileSync(localPath, buf);\nconsole.log('Saved: ' + localPath + ' (' + buf.length + ' bytes)');\nreturn { json: { ...prev, clipName, localPath } };"
-      }
-    },
-    {
-      "id": "get-clip-duration",
-      "name": "Get Clip Duration",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1568,
-        304
-      ],
-      "parameters": {
-        "mode": "runOnceForEachItem",
-        "jsCode": "const { execSync } = require('child_process');\nconst prev = $('Pick Random Drive Files').item.json;\nconst jobId = prev.jobData.job_id;\nconst fileId = prev.fileId;\nconst contPath = '/ffmpeg/input/' + jobId + '_' + fileId + '.mp4';\nlet duration = 5.0;\ntry {\n  const d = parseFloat(execSync(\n    'docker exec phys_ffmpeg_runner ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 \"' + contPath + '\"',\n    { encoding: 'utf8', timeout: 15000 }\n  ).trim());\n  if (d > 0.5) duration = d;\n} catch(e) { console.log('ffprobe err: ' + e.message); }\nconsole.log('Clip ready: ' + contPath + ' (' + duration.toFixed(2) + 's)');\nreturn { json: { contPath, duration, clipName: jobId + '_' + fileId + '.mp4', jobData: prev.jobData } };"
+        "jsCode": "const { execSync } = require('child_process');\nconst items = $input.all().map(i => i.json);\nconst jobData = items[0]?.jobData;\nif (!jobData) throw new Error('No job data from Pick Random Drive Files');\n\nconst results = [];\nfor (let i = 0; i < items.length; i++) {\n  const { fileId } = items[i];\n  const contPath = '/ffmpeg/input/' + jobData.job_id + '_drv' + i + '.mp4';\n  const dlUrl = 'https://drive.google.com/uc?export=download&id=' + fileId + '&confirm=t';\n  try {\n    const out = execSync(\n      'docker exec phys_ffmpeg_runner curl -sL --max-time 120 -o \"' + contPath + '\" \"' + dlUrl + '\" && docker exec phys_ffmpeg_runner test -s \"' + contPath + '\" && echo DL_OK',\n      { encoding: 'utf-8', timeout: 130000 }\n    );\n    if (!out.includes('DL_OK')) { console.log('Clip ' + i + ' download failed'); continue; }\n  } catch(e) { console.log('Clip ' + i + ' error: ' + e.message); continue; }\n  let duration = 5.0;\n  try {\n    const d = parseFloat(execSync(\n      'docker exec phys_ffmpeg_runner ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 \"' + contPath + '\"',\n      { encoding: 'utf8', timeout: 10000 }\n    ).trim());\n    if (d > 0.5) duration = d;\n  } catch(e) {}\n  console.log('Clip ' + i + ': ' + contPath + ' (' + duration.toFixed(2) + 's)');\n  results.push({ contPath, duration, clipName: jobData.job_id + '_drv' + i + '.mp4', jobData });\n}\nif (!results.length) throw new Error('No clips downloaded from Drive for job ' + jobData.job_id);\nreturn results.map(r => ({ json: r }));"
       }
     },
     {
@@ -548,36 +508,14 @@
       "main": [
         [
           {
-            "node": "Download Drive Clip",
+            "node": "Download Clips from Drive",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Download Drive Clip": {
-      "main": [
-        [
-          {
-            "node": "Write Clip to Disk",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Write Clip to Disk": {
-      "main": [
-        [
-          {
-            "node": "Get Clip Duration",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Get Clip Duration": {
+    "Download Clips from Drive": {
       "main": [
         [
           {
