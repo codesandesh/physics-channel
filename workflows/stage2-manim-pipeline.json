@@ -304,7 +304,7 @@
         304
       ],
       "parameters": {
-        "jsCode": "const driveFiles = $('List Drive Clips').item.json.files || [];\nif (!driveFiles.length) throw new Error('No files found in Drive folder');\n\nconst data = $('Extract Payload').item.json;\n\nfunction shuffle(arr) {\n  const a = [...arr];\n  for (let i = a.length - 1; i > 0; i--) {\n    const j = Math.floor(Math.random() * (i + 1));\n    [a[i], a[j]] = [a[j], a[i]];\n  }\n  return a;\n}\n\nconst shuffled = shuffle(driveFiles).slice(0, 10);\nconsole.log('Picked ' + shuffled.length + ' random files from Drive for job ' + data.job_id);\n\nreturn shuffled.map(f => ({ json: { fileId: f.id, fileName: f.name, jobData: data } }));"
+        "jsCode": "const driveFiles = $('List Drive Clips').item.json.files || [];\nif (!driveFiles.length) throw new Error('No files found in Drive folder');\n\nlet data;\ntry { data = $('Extract Payload').first().json; } catch(e) {}\nif (!data || !data.job_id) { try { data = $('Mark IN_PROGRESS in Video Queue').first().json; } catch(e) {} }\nif (!data || !data.job_id) throw new Error('No job data found in Extract Payload or Mark IN_PROGRESS');\n\nfunction shuffle(arr) {\n  const a = [...arr];\n  for (let i = a.length - 1; i > 0; i--) {\n    const j = Math.floor(Math.random() * (i + 1));\n    [a[i], a[j]] = [a[j], a[i]];\n  }\n  return a;\n}\n\nconst shuffled = shuffle(driveFiles).slice(0, 10);\nconsole.log('Picked ' + shuffled.length + ' random files from Drive for job ' + data.job_id);\n\nreturn shuffled.map(f => ({ json: { fileId: f.id, fileName: f.name, jobData: data } }));"
       }
     },
     {
@@ -333,17 +333,32 @@
       }
     },
     {
-      "id": "save-clip-to-local",
-      "name": "Save Clip to Local",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
+      "id": "write-clip-to-disk",
+      "name": "Write Clip to Disk",
+      "type": "n8n-nodes-base.writeBinaryFile",
+      "typeVersion": 1,
       "position": [
         1344,
         304
       ],
       "parameters": {
+        "fileName": "=/data/ffmpeg/input/{{ $('Pick Random Drive Files').item.json.jobData.job_id }}_{{ $('Pick Random Drive Files').item.json.fileId }}.mp4",
+        "dataPropertyName": "data",
+        "options": {}
+      }
+    },
+    {
+      "id": "get-clip-duration",
+      "name": "Get Clip Duration",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1568,
+        304
+      ],
+      "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const fs = require('fs');\nconst { execSync } = require('child_process');\n\nconst fileName = $input.item.json.fileName;\nconst jobData = $input.item.json.jobData;\n\nconst clipName = fileName.endsWith('_norm.mp4') ? fileName : fileName.replace(/\\.[^.]+$/, '') + '_norm.mp4';\nconst localPath = '/data/ffmpeg/clips/' + clipName;\nconst contPath  = '/ffmpeg/clips/' + clipName;\n\nconst buf = await this.helpers.getBinaryDataBuffer($input.item, 'data');\nfs.writeFileSync(localPath, buf);\n\nlet duration = 5.0;\ntry {\n  const out = execSync(\n    'docker exec phys_ffmpeg_runner ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 \"' + contPath + '\"',\n    { encoding: 'utf8', timeout: 15000 }\n  ).trim();\n  const d = parseFloat(out);\n  if (d > 0.5) duration = d;\n} catch(e) { console.log('ffprobe failed for ' + clipName + ': ' + e.message); }\n\nconsole.log('Saved: ' + clipName + ' (' + duration.toFixed(2) + 's)');\nreturn { json: { contPath, duration, clipName, jobData } };"
+        "jsCode": "const { execSync } = require('child_process');\nconst prev = $('Pick Random Drive Files').item.json;\nconst jobId = prev.jobData.job_id;\nconst fileId = prev.fileId;\nconst contPath = '/ffmpeg/input/' + jobId + '_' + fileId + '.mp4';\nlet duration = 5.0;\ntry {\n  const d = parseFloat(execSync(\n    'docker exec phys_ffmpeg_runner ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 \"' + contPath + '\"',\n    { encoding: 'utf8', timeout: 15000 }\n  ).trim());\n  if (d > 0.5) duration = d;\n} catch(e) { console.log('ffprobe err: ' + e.message); }\nconsole.log('Clip ready: ' + contPath + ' (' + duration.toFixed(2) + 's)');\nreturn { json: { contPath, duration, clipName: jobId + '_' + fileId + '.mp4', jobData: prev.jobData } };"
       }
     },
     {
@@ -508,6 +523,17 @@
         ]
       ]
     },
+    "Mark IN_PROGRESS in Video Queue": {
+      "main": [
+        [
+          {
+            "node": "List Drive Clips",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
     "List Drive Clips": {
       "main": [
         [
@@ -534,14 +560,25 @@
       "main": [
         [
           {
-            "node": "Save Clip to Local",
+            "node": "Write Clip to Disk",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Save Clip to Local": {
+    "Write Clip to Disk": {
+      "main": [
+        [
+          {
+            "node": "Get Clip Duration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Clip Duration": {
       "main": [
         [
           {
