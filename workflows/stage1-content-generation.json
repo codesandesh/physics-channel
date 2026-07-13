@@ -316,7 +316,7 @@
           "interval": [
             {
               "field": "cronExpression",
-              "expression": "15 15 * * *"
+              "expression": "15 3,15 * * *"
             }
           ]
         }
