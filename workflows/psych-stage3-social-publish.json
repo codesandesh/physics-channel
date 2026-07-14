@@ -7,13 +7,13 @@
           "interval": [
             {
               "field": "cronExpression",
-              "expression": "0 */3 * * *"
+              "expression": "0 2,10,18 * * *"
             }
           ]
         }
       },
       "id": "psych4-n0",
-      "name": "Every 3 Hours",
+      "name": "Every 8 Hours",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.1,
       "position": [
@@ -294,17 +294,6 @@
     }
   ],
   "connections": {
-    "Every 3 Hours": {
-      "main": [
-        [
-          {
-            "node": "Read Video Queue",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "Manual Trigger": {
       "main": [
         [
@@ -453,6 +442,17 @@
         [
           {
             "node": "Mark Aperture Topics LIVE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every 8 Hours": {
+      "main": [
+        [
+          {
+            "node": "Read Video Queue",
             "type": "main",
             "index": 0
           }

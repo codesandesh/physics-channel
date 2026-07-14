@@ -2,6 +2,26 @@
   "name": "Aperture Channel - Stage 1 - Content Generation",
   "nodes": [
     {
+      "id": "psych1-sched",
+      "name": "Every 8 Hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        440
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 6,14,22 * * *"
+            }
+          ]
+        }
+      }
+    },
+    {
       "parameters": {},
       "id": "psych1-n0",
       "name": "Manual Trigger",
@@ -328,6 +348,17 @@
         [
           {
             "node": "Mark STAGE2 in Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every 8 Hours": {
+      "main": [
+        [
+          {
+            "node": "Read Topic From Sheet",
             "type": "main",
             "index": 0
           }
