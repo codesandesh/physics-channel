@@ -136,8 +136,25 @@ services:
       - ./uploads:/data/uploads
       - ./config:/data/config
       - ./workflows:/data/workflows
+      - ./manim/scripts:/data/manim/scripts
+      - ./manim/renders:/data/manim/renders
+      - ./manim/combined:/data/manim/combined
 
-  # manim-runner: disabled for now — add back when Stage 2 is needed
+  manim-runner:
+    build:
+      context: ./manim
+      dockerfile: Dockerfile
+    container_name: qpc_manim_runner
+    restart: always
+    networks:
+      - physics-pipeline-network
+    env_file:
+      - .env
+    volumes:
+      - ./manim/scripts:/manim/scripts
+      - ./manim/renders:/manim/renders
+      - ./manim/combined:/manim/combined
+    command: tail -f /dev/null
 
   ffmpeg-runner:
     build:
