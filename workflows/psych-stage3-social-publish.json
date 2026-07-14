@@ -37,7 +37,7 @@
         "method": "GET",
         "url": "https://sheets.googleapis.com/v4/spreadsheets/1VD-F6Wj47Dm_5Uo_zdIEuxOnqprepCPRTKEmTYs6mFs/values/Aperture%20Video%20Queue!A2:L",
         "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "nodeCredentialType": "googleDriveOAuth2Api",
         "options": {
           "timeout": 10000
         }
@@ -51,7 +51,7 @@
         80
       ],
       "credentials": {
-        "googleSheetsOAuth2Api": {
+        "googleDriveOAuth2Api": {
           "id": "lTPBYO6mXOO43KmE",
           "name": "Google Sheets account"
         }
@@ -75,7 +75,7 @@
         "method": "PUT",
         "url": "={{ 'https://sheets.googleapis.com/v4/spreadsheets/1VD-F6Wj47Dm_5Uo_zdIEuxOnqprepCPRTKEmTYs6mFs/values/Aperture%20Video%20Queue!C' + $json.queue_row + '?valueInputOption=USER_ENTERED' }}",
         "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "nodeCredentialType": "googleDriveOAuth2Api",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ majorDimension: 'ROWS', values: [['Posting']] }) }}",
@@ -93,7 +93,7 @@
         80
       ],
       "credentials": {
-        "googleSheetsOAuth2Api": {
+        "googleDriveOAuth2Api": {
           "id": "lTPBYO6mXOO43KmE",
           "name": "Google Sheets account"
         }
@@ -200,7 +200,7 @@
         "method": "PUT",
         "url": "={{ 'https://sheets.googleapis.com/v4/spreadsheets/1VD-F6Wj47Dm_5Uo_zdIEuxOnqprepCPRTKEmTYs6mFs/values/Aperture%20Video%20Queue!C' + $json.queue_row + ':L' + $json.queue_row + '?valueInputOption=USER_ENTERED' }}",
         "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "nodeCredentialType": "googleDriveOAuth2Api",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ majorDimension: 'ROWS', values: [[ $json.any_success ? 'Posted' : 'Failed', $json.drive_video_url, $json.title, $json.hashtags, $json.youtube_url, $json.instagram_url, $json.tiktok_url, $json.facebook_url, $json.linkedin_url, $json.posted_at ]] }) }}",
@@ -218,7 +218,7 @@
         320
       ],
       "credentials": {
-        "googleSheetsOAuth2Api": {
+        "googleDriveOAuth2Api": {
           "id": "lTPBYO6mXOO43KmE",
           "name": "Google Sheets account"
         }
@@ -229,7 +229,7 @@
         "method": "GET",
         "url": "https://sheets.googleapis.com/v4/spreadsheets/1VD-F6Wj47Dm_5Uo_zdIEuxOnqprepCPRTKEmTYs6mFs/values/Aperture%20Topics!A2:A",
         "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "nodeCredentialType": "googleDriveOAuth2Api",
         "options": {
           "timeout": 10000
         }
@@ -244,7 +244,7 @@
         320
       ],
       "credentials": {
-        "googleSheetsOAuth2Api": {
+        "googleDriveOAuth2Api": {
           "id": "lTPBYO6mXOO43KmE",
           "name": "Google Sheets account"
         }
@@ -268,7 +268,7 @@
         "method": "PUT",
         "url": "={{ $json.topics_row ? ('https://sheets.googleapis.com/v4/spreadsheets/1VD-F6Wj47Dm_5Uo_zdIEuxOnqprepCPRTKEmTYs6mFs/values/Aperture%20Topics!B' + $json.topics_row + '?valueInputOption=USER_ENTERED') : 'https://sheets.googleapis.com/v4/spreadsheets/1VD-F6Wj47Dm_5Uo_zdIEuxOnqprepCPRTKEmTYs6mFs/values/Aperture%20Topics!B1?valueInputOption=USER_ENTERED' }}",
         "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "nodeCredentialType": "googleDriveOAuth2Api",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ majorDimension: 'ROWS', values: [['LIVE']] }) }}",
@@ -286,7 +286,7 @@
         320
       ],
       "credentials": {
-        "googleSheetsOAuth2Api": {
+        "googleDriveOAuth2Api": {
           "id": "lTPBYO6mXOO43KmE",
           "name": "Google Sheets account"
         }

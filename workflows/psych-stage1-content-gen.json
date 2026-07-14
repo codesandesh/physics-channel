@@ -48,7 +48,7 @@
         "method": "GET",
         "url": "https://sheets.googleapis.com/v4/spreadsheets/1VD-F6Wj47Dm_5Uo_zdIEuxOnqprepCPRTKEmTYs6mFs/values/Aperture%20Topics!A2:G",
         "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "nodeCredentialType": "googleDriveOAuth2Api",
         "options": {
           "timeout": 10000
         }
@@ -62,7 +62,7 @@
         220
       ],
       "credentials": {
-        "googleSheetsOAuth2Api": {
+        "googleDriveOAuth2Api": {
           "id": "lTPBYO6mXOO43KmE",
           "name": "Google Sheets account"
         }
@@ -86,7 +86,7 @@
         "method": "PUT",
         "url": "={{ 'https://sheets.googleapis.com/v4/spreadsheets/1VD-F6Wj47Dm_5Uo_zdIEuxOnqprepCPRTKEmTYs6mFs/values/Aperture%20Topics!B' + $json.sheet_row + '?valueInputOption=USER_ENTERED' }}",
         "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "nodeCredentialType": "googleDriveOAuth2Api",
         "sendBody": true,
         "contentType": "json",
         "body": "={ \"majorDimension\": \"ROWS\", \"values\": [[\"IN_PROGRESS\"]] }",
@@ -104,7 +104,7 @@
         220
       ],
       "credentials": {
-        "googleSheetsOAuth2Api": {
+        "googleDriveOAuth2Api": {
           "id": "lTPBYO6mXOO43KmE",
           "name": "Google Sheets account"
         }
@@ -187,7 +187,7 @@
         "method": "PUT",
         "url": "={{ 'https://sheets.googleapis.com/v4/spreadsheets/1VD-F6Wj47Dm_5Uo_zdIEuxOnqprepCPRTKEmTYs6mFs/values/Aperture%20Topics!B' + $('Set Job Config').first().json.sheet_row + '?valueInputOption=USER_ENTERED' }}",
         "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "nodeCredentialType": "googleDriveOAuth2Api",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ majorDimension: 'ROWS', values: [['STAGE2']] }) }}",
@@ -205,7 +205,7 @@
         110
       ],
       "credentials": {
-        "googleSheetsOAuth2Api": {
+        "googleDriveOAuth2Api": {
           "id": "lTPBYO6mXOO43KmE",
           "name": "Google Sheets account"
         }
