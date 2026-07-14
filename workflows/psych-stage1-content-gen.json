@@ -63,7 +63,7 @@
       ],
       "credentials": {
         "googleSheetsOAuth2Api": {
-          "id": "wUDvDA62yzWuxKP9",
+          "id": "lTPBYO6mXOO43KmE",
           "name": "Google Sheets account"
         }
       }
@@ -105,7 +105,7 @@
       ],
       "credentials": {
         "googleSheetsOAuth2Api": {
-          "id": "wUDvDA62yzWuxKP9",
+          "id": "lTPBYO6mXOO43KmE",
           "name": "Google Sheets account"
         }
       }
@@ -206,7 +206,7 @@
       ],
       "credentials": {
         "googleSheetsOAuth2Api": {
-          "id": "wUDvDA62yzWuxKP9",
+          "id": "lTPBYO6mXOO43KmE",
           "name": "Google Sheets account"
         }
       }
