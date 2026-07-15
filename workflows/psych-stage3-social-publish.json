@@ -35,7 +35,7 @@
     {
       "parameters": {
         "method": "GET",
-        "url": "https://sheets.googleapis.com/v4/spreadsheets/1VD-F6Wj47Dm_5Uo_zdIEuxOnqprepCPRTKEmTYs6mFs/values/Aperture%20Video%20Queue!A2:L",
+        "url": "https://sheets.googleapis.com/v4/spreadsheets/1VD-F6Wj47Dm_5Uo_zdIEuxOnqprepCPRTKEmTYs6mFs/values/Aperture%20Video%20Queue!A2:N",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "googleDriveOAuth2Api",
         "options": {
@@ -156,7 +156,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const data = $('Pick Next Ready Row').first().json;\nconst platforms = ['Upload to YouTube','Post via PostForMe','Upload to Facebook Reels'];\nconst results = platforms.map(n => {\n  try {\n    const r = $(n).first().json;\n    return { node: n, platform: r.platform || n, success: r.success, error: r.error || null, url: r.url || r.urls || '' };\n  } catch(e) {\n    return { node: n, platform: n, success: false, error: 'Node did not run or threw: ' + e.message };\n  }\n});\n\nconst passed = results.filter(r => r.success).map(r => r.platform);\nconst failed = results.filter(r => !r.success).map(r => r.platform + ': ' + (r.error || 'unknown'));\n\nconsole.log('=== Stage 3 Summary for job ' + data.job_id + ' ===');\npassed.forEach(p => console.log('  PASS: ' + p));\nfailed.forEach(f => console.log('  FAIL: ' + f));\n\nreturn [{ json: {\n  job_id:      data.job_id,\n  topic:       data.topic,\n  title:       data.title,\n  sheet_row:   data.sheet_row,\n  all_success: passed.length > 0,\n  passed,\n  failed,\n  results\n}}];"
+        "jsCode": "const data = $('Pick Next Ready Row').first().json;\nconst platforms = ['Upload to YouTube','Post via PostForMe','Upload to Facebook Reels'];\nconst results = platforms.map(n => {\n  try {\n    const r = $(n).first().json;\n    return { node: n, platform: r.platform || n, success: r.success, error: r.error || null, url: r.url || r.urls || '' };\n  } catch(e) {\n    return { node: n, platform: n, success: false, error: 'Node did not run or threw: ' + e.message };\n  }\n});\n\nconst passed = results.filter(r => r.success).map(r => r.platform);\nconst failed = results.filter(r => !r.success).map(r => r.platform + ': ' + (r.error || 'unknown'));\n\nconsole.log('=== Stage 3 Summary for job ' + data.job_id + ' ===');\npassed.forEach(p => console.log('  PASS: ' + p));\nfailed.forEach(f => console.log('  FAIL: ' + f));\n\nreturn [{ json: {\n  job_id:      data.job_id,\n  topic:       data.topic,\n  title:       data.title,\n  queue_row:   data.queue_row,\n  all_success: passed.length > 0,\n  passed,\n  failed,\n  results\n}}];"
       },
       "id": "psych4-n10",
       "name": "Collect Results",
@@ -170,12 +170,12 @@
     {
       "parameters": {
         "method": "PUT",
-        "url": "={{ 'https://sheets.googleapis.com/v4/spreadsheets/1VD-F6Wj47Dm_5Uo_zdIEuxOnqprepCPRTKEmTYs6mFs/values/Aperture%20Video%20Queue!C' + $json.queue_row + ':L' + $json.queue_row + '?valueInputOption=USER_ENTERED' }}",
+        "url": "={{ 'https://sheets.googleapis.com/v4/spreadsheets/1VD-F6Wj47Dm_5Uo_zdIEuxOnqprepCPRTKEmTYs6mFs/values/Aperture%20Video%20Queue!C' + $json.queue_row + '?valueInputOption=USER_ENTERED' }}",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "googleDriveOAuth2Api",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ majorDimension: 'ROWS', values: [[ $json.any_success ? 'Posted' : 'Failed', $json.drive_video_url, $json.title, $json.hashtags, $json.youtube_url, $json.instagram_url, $json.tiktok_url, $json.facebook_url, $json.linkedin_url, $json.posted_at ]] }) }}",
+        "jsonBody": "={{ JSON.stringify({ majorDimension: 'ROWS', values: [[ $json.all_success ? 'Posted' : 'Failed' ]] }) }}",
         "options": {
           "timeout": 10000
         }
