@@ -322,7 +322,7 @@
         "nodeCredentialType": "googleDriveOAuth2Api",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ majorDimension: 'ROWS', values: [[ $json.job_id, $json.philosopher, 'Ready to Post', $json.drive_video_url || '', $json.title, $json.hashtags || '', $json.quote || '', $json.caption || '', '', '', '', '', '', '' ]] }) }}",
+        "jsonBody": "={{ JSON.stringify({ majorDimension: 'ROWS', values: [[ $json.job_id, $json.philosopher, 'Ready to Post', $json.drive_video_url || '', $json.title, $json.hashtags || '', '', '', '', '', '', '' ]] }) }}",
         "options": {
           "timeout": 10000
         }
