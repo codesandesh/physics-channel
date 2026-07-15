@@ -368,6 +368,8 @@
       ],
       "continueOnFail": true,
       "parameters": {
+        "resource": "file",
+        "operation": "upload",
         "name": "={{ $('Assemble Video').first().json.thumb_filename }}",
         "driveId": {
           "__rl": true,
@@ -380,6 +382,7 @@
           "value": "={{ $env.GOOGLE_DRIVE_FOLDER_ID_VIDEOS }}",
           "mode": "id"
         },
+        "inputDataFieldName": "data",
         "options": {
           "simplifyOutput": false
         }
