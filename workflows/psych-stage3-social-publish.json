@@ -156,21 +156,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const https = require('https');\nconst data = $('Download Video for Publishing').first().json;\nconst apiKey = $env.AYRSHARE_API_KEY;\nconst profileKey = $env.AYRSHARE_APERTURE_LINKEDIN_PROFILE_ID;\nif (!apiKey) throw new Error('AYRSHARE_API_KEY not set');\nif (!profileKey) throw new Error('AYRSHARE_APERTURE_LINKEDIN_PROFILE_ID not set');\nconst nl = String.fromCharCode(10);\nconst caption = ((data.title || data.topic || '') + nl + nl + (data.hashtags || '')).slice(0, 2190);\nconst payload = Buffer.from(JSON.stringify(Object.assign({ post: caption, platforms: ['linkedin'], mediaUrls: [data.drive_video_url], profileKey }, {})));\nconst result = await new Promise((resolve, reject) => {\n  const req = https.request({ hostname: 'app.ayrshare.com', path: '/api/post', method: 'POST',\n    headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json', 'Content-Length': payload.length }\n  }, res => { let d=''; res.on('data',c=>d+=c); res.on('end',()=>{ try{resolve(JSON.parse(d));}catch(e){reject(new Error('Non-JSON: '+d.slice(0,200)));} }); });\n  req.on('error', reject); req.write(payload); req.end();\n});\nconsole.log('Ayrshare linkedin:', JSON.stringify(result).slice(0,200));\nif (result.status === 'error') throw new Error('Ayrshare linkedin error: ' + result.message);\nconst url = result.postIds?.find(p=>p.platform==='linkedin')?.postUrl || '';\nreturn [{ json: { platform: 'linkedin', success: true, url } }];"
-      },
-      "id": "psych4-n8",
-      "name": "Upload to LinkedIn",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "continueOnFail": true,
-      "position": [
-        1220,
-        480
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "const data = $('Pick Next Ready Row').first().json;\nconst results = ['Upload to YouTube','Post via PostForMe','Upload to Facebook Reels','Upload to TikTok'].map(n => {\n  try { return $(n).first().json; } catch(e) { return { platform: n, success: false, error: 'node did not run' }; }\n});\n\nconst byPlatform = {};\nresults.forEach(r => { byPlatform[r.platform] = r; });\n\nconst anySuccess = results.some(r => r.success);\nconsole.log('Publish results for ' + data.job_id + ': ' + results.map(r => r.platform + '=' + (r.success ? 'OK' : 'FAIL')).join(', '));\n\nreturn [{ json: {\n  ...data,\n  youtube_url:   (byPlatform.youtube   && byPlatform.youtube.success)   ? byPlatform.youtube.url   : '',\n  instagram_url: (byPlatform.instagram && byPlatform.instagram.success) ? byPlatform.instagram.url : '',\n  facebook_url:  (byPlatform.facebook  && byPlatform.facebook.success)  ? byPlatform.facebook.url  : '',\n  linkedin_url:  (byPlatform.linkedin  && byPlatform.linkedin.success)  ? byPlatform.linkedin.url  : '',\n  tiktok_url:    (byPlatform.tiktok    && byPlatform.tiktok.success)    ? byPlatform.tiktok.url    : '',\n  any_success:   anySuccess,\n  posted_at:     new Date().toISOString()\n}}];"
+        "jsCode": "const data = $('Pick Next Ready Row').first().json;\nconst results = ['Upload to YouTube','Post via PostForMe','Upload to Facebook Reels'].map(n => {\n  try { return $(n).first().json; } catch(e) { return { platform: n, success: false, error: 'node did not run' }; }\n});\nconst anySuccess = results.some(r => r.success);\nconsole.log('Publish results for ' + data.job_id + ': ' + results.map(r => r.platform + '=' + (r.success ? 'OK' : 'FAIL')).join(', '));\nreturn [{ json: {\n  job_id: data.job_id,\n  topic: data.topic,\n  title: data.title,\n  sheet_row: data.sheet_row,\n  all_success: anySuccess,\n  results\n}}];"
       },
       "id": "psych4-n10",
       "name": "Collect Results",
@@ -331,6 +317,16 @@
             "node": "Upload to YouTube",
             "type": "main",
             "index": 0
+          },
+          {
+            "node": "Post via PostForMe",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Upload to Facebook Reels",
+            "type": "main",
+            "index": 0
           }
         ]
       ]
@@ -339,7 +335,7 @@
       "main": [
         [
           {
-            "node": "Post via PostForMe",
+            "node": "Collect Results",
             "type": "main",
             "index": 0
           }
@@ -350,16 +346,11 @@
       "main": [
         [
           {
-            "node": "Upload to LinkedIn",
+            "node": "Collect Results",
             "type": "main",
             "index": 0
           }
         ]
-      ]
-    },
-    "Upload to LinkedIn": {
-      "main": [
-        []
       ]
     },
     "Collect Results": {
@@ -421,7 +412,7 @@
       "main": [
         [
           {
-            "node": "Upload to Facebook Reels",
+            "node": "Collect Results",
             "type": "main",
             "index": 0
           }
