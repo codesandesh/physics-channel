@@ -1,0 +1,14 @@
+
+UPDATE workflow_entity SET nodes = (
+  SELECT json_agg(CASE WHEN (elem::jsonb->>'name') = 'Add to Video Queue'
+    THEN \${"parameters":{"method":"POST","url":"https://sheets.googleapis.com/v4/spreadsheets/1VD-F6Wj47Dm_5Uo_zdIEuxOnqprepCPRTKEmTYs6mFs/values/Aperture%20Video%20Queue!A:N:append?valueInputOption=USER_ENTERED","authentication":"predefinedCredentialType","nodeCredentialType":"googleSheetsOAuth2Api","sendBody":true,"specifyBody":"json","jsonBody":"={{ JSON.stringify({ majorDimension: 'ROWS', values: [[ $json.job_id, $json.philosopher, 'Ready to Post', $json.drive_video_url || '', $json.title, $json.hashtags || '', '', '', '', '', '', '' ]] }) }}","options":{"timeout":10000}},"id":"psych2-n12","name":"Add to Video Queue","type":"n8n-nodes-base.httpRequest","typeVersion":4,"continueOnFail":true,"position":[3060,80],"credentials":{"googleSheetsOAuth2Api":{"id":"Jjgt2YNg8jNRBVXS","name":"Google Sheets account"}}}\$::jsonb
+    ELSE elem::jsonb END)
+  FROM json_array_elements(nodes) AS elem
+) WHERE name ILIKE '%aperture%stage2%' OR name ILIKE '%psych%stage2%' OR name ILIKE '%video%gen%';
+
+UPDATE workflow_entity SET nodes = (
+  SELECT json_agg(CASE WHEN (elem::jsonb->>'name') = 'Mark DONE in Sheet'
+    THEN \${"parameters":{"method":"PUT","url":"={{ 'https://sheets.googleapis.com/v4/spreadsheets/1VD-F6Wj47Dm_5Uo_zdIEuxOnqprepCPRTKEmTYs6mFs/values/Aperture%20Topics!B' + $json.sheet_row + '?valueInputOption=USER_ENTERED' }}","authentication":"predefinedCredentialType","nodeCredentialType":"googleSheetsOAuth2Api","sendBody":true,"specifyBody":"json","jsonBody":"={{ JSON.stringify({ majorDimension: 'ROWS', values: [['DONE']] }) }}","options":{"timeout":10000}},"id":"psych2-n11","name":"Mark DONE in Sheet","type":"n8n-nodes-base.httpRequest","typeVersion":4,"continueOnFail":true,"position":[3060,-80],"credentials":{"googleSheetsOAuth2Api":{"id":"Jjgt2YNg8jNRBVXS","name":"Google Sheets account"}}}\$::jsonb
+    ELSE elem::jsonb END)
+  FROM json_array_elements(nodes) AS elem
+) WHERE name ILIKE '%aperture%stage2%' OR name ILIKE '%psych%stage2%' OR name ILIKE '%video%gen%';

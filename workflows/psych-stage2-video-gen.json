@@ -290,7 +290,7 @@
         "method": "PUT",
         "url": "={{ 'https://sheets.googleapis.com/v4/spreadsheets/1VD-F6Wj47Dm_5Uo_zdIEuxOnqprepCPRTKEmTYs6mFs/values/Aperture%20Topics!B' + $json.sheet_row + '?valueInputOption=USER_ENTERED' }}",
         "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "googleDriveOAuth2Api",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ majorDimension: 'ROWS', values: [['DONE']] }) }}",
@@ -308,8 +308,8 @@
         -80
       ],
       "credentials": {
-        "googleDriveOAuth2Api": {
-          "id": "lTPBYO6mXOO43KmE",
+        "googleSheetsOAuth2Api": {
+          "id": "Jjgt2YNg8jNRBVXS",
           "name": "Google Sheets account"
         }
       }
@@ -319,7 +319,7 @@
         "method": "POST",
         "url": "https://sheets.googleapis.com/v4/spreadsheets/1VD-F6Wj47Dm_5Uo_zdIEuxOnqprepCPRTKEmTYs6mFs/values/Aperture%20Video%20Queue!A:N:append?valueInputOption=USER_ENTERED",
         "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "googleDriveOAuth2Api",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ majorDimension: 'ROWS', values: [[ $json.job_id, $json.philosopher, 'Ready to Post', $json.drive_video_url || '', $json.title, $json.hashtags || '', '', '', '', '', '', '' ]] }) }}",
@@ -337,8 +337,8 @@
         80
       ],
       "credentials": {
-        "googleDriveOAuth2Api": {
-          "id": "lTPBYO6mXOO43KmE",
+        "googleSheetsOAuth2Api": {
+          "id": "Jjgt2YNg8jNRBVXS",
           "name": "Google Sheets account"
         }
       }
