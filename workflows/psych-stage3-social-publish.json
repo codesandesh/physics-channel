@@ -59,7 +59,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const res = $input.first().json;\nconst rows = res.values || [];\nlet found = null, idx = -1;\nfor (let i = 0; i < rows.length; i++) {\n  if ((rows[i][2] || '').toString().trim() === 'Ready to Post') { found = rows[i]; idx = i; break; }\n}\nif (!found) throw new Error('No rows with Status = Ready to Post in Aperture Video Queue.');\nconst rowNumber = idx + 2;\nreturn [{ json: {\n  job_id:          (found[0] || '').trim(),\n  topic:           (found[1] || '').trim(),\n  drive_video_url: (found[3] || '').trim(),\n  title:           (found[4] || '').trim(),\n  hashtags:        (found[5] || '').trim(),\n  queue_row:       rowNumber\n}}];"
+        "jsCode": "const res = $input.first().json;\nconst rows = res.values || [];\nlet found = null, idx = -1;\nfor (let i = 0; i < rows.length; i++) {\n  if ((rows[i][2] || '').toString().trim() === 'Ready to Post') { found = rows[i]; idx = i; break; }\n}\nif (!found) throw new Error('No rows with Status = Ready to Post in Aperture Video Queue.');\nconst rowNumber = idx + 2;\nreturn [{ json: {\n  job_id:          (found[0] || '').trim(),\n  topic:           (found[1] || '').trim(),\n  drive_video_url: (found[3] || '').trim(),\n  title:           (found[4] || '').trim(),\n  hashtags:        (found[5] || '').trim(),\n  caption:         (found[6] || '').trim(),\n  queue_row:       rowNumber\n}}];"
       },
       "id": "psych4-n2",
       "name": "Pick Next Ready Row",
