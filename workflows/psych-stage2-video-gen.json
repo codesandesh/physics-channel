@@ -410,18 +410,8 @@
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "googleDriveOAuth2Api",
         "sendBody": true,
-        "bodyParameters": {
-          "parameters": [
-            {
-              "name": "type",
-              "value": "anyone"
-            },
-            {
-              "name": "role",
-              "value": "reader"
-            }
-          ]
-        },
+        "specifyBody": "json",
+        "jsonBody": "={\"type\":\"anyone\",\"role\":\"reader\"}",
         "options": {
           "timeout": 15000
         }
