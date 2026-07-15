@@ -128,10 +128,10 @@
     },
     {
       "parameters": {
-        "jsCode": "const https = require('https');\nconst data = $('Download Video for Publishing').first().json;\nconst apiKey = $env.POSTFORME_API_KEY;\nconst accountId = $env.POSTFORME_APERTURE_IG_ACCOUNT_ID;\nif (!apiKey) throw new Error('POSTFORME_API_KEY not set');\nif (!accountId) throw new Error('POSTFORME_APERTURE_IG_ACCOUNT_ID not set');\nconst nl = String.fromCharCode(10);\nconst caption = ((data.title || data.topic || '') + nl + nl + (data.hashtags || '')).slice(0, 2190);\nconst videoUrl = data.drive_video_url;\nif (!videoUrl) throw new Error('No drive_video_url in data');\nconst postBody = JSON.stringify({ caption, social_accounts: [accountId], media: [{ url: videoUrl }] });\nconst result = await new Promise((resolve, reject) => {\n  const buf = Buffer.from(postBody);\n  const req = https.request({\n    hostname: 'api.postforme.dev', path: '/v1/social-posts', method: 'POST',\n    headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json', 'Content-Length': buf.length }\n  }, res => { let d=''; res.on('data',c=>d+=c); res.on('end',()=>{ try{resolve(JSON.parse(d));}catch(e){reject(new Error('Non-JSON: '+d.slice(0,200)));} }); });\n  req.on('error', reject); req.write(buf); req.end();\n});\nconsole.log('PostForMe instagram:', JSON.stringify(result).slice(0,300));\nif (result.error || result.status === 'error') throw new Error('PostForMe instagram error: ' + (result.message || JSON.stringify(result)));\nconst url = result.postIds?.find(p=>p.platform==='instagram')?.postUrl || result.url || '';\nreturn [{ json: { platform: 'instagram', success: true, url } }];"
+        "jsCode": "const https = require('https');\nconst data = $('Download Video for Publishing').first().json;\nconst apiKey = $env.POSTFORME_API_KEY;\nconst igId   = $env.POSTFORME_APERTURE_IG_ACCOUNT_ID;\nconst ttId   = $env.POSTFORME_APERTURE_TIKTOK_ACCOUNT_ID;\nif (!apiKey) throw new Error('POSTFORME_API_KEY not set');\nif (!igId)   throw new Error('POSTFORME_APERTURE_IG_ACCOUNT_ID not set');\nif (!ttId)   throw new Error('POSTFORME_APERTURE_TIKTOK_ACCOUNT_ID not set');\n\nconst nl = String.fromCharCode(10);\nconst videoUrl = data.drive_video_url || data.video_url || '';\nif (!videoUrl) throw new Error('No video URL available');\n\nconst caption = ((data.title || data.topic || '') + nl + nl + (data.caption || '') + nl + nl + (data.hashtags || '')).slice(0, 2190);\n\nfunction postToAccount(accountId, platform) {\n  return new Promise((resolve, reject) => {\n    const body = JSON.stringify({ caption, social_accounts: [accountId], media: [{ url: videoUrl }] });\n    const buf = Buffer.from(body);\n    const req = https.request({\n      hostname: 'api.postforme.dev', path: '/v1/social-posts', method: 'POST',\n      headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json', 'Content-Length': buf.length }\n    }, (res) => {\n      const chunks = [];\n      res.on('data', c => chunks.push(c));\n      res.on('end', () => {\n        try {\n          const r = JSON.parse(Buffer.concat(chunks).toString());\n          const url = (r.data && r.data[0] && r.data[0].url) || '';\n          resolve({ platform, success: res.statusCode < 300, url, status: res.statusCode, raw: JSON.stringify(r).slice(0,200) });\n        } catch(e) { resolve({ platform, success: false, error: e.message }); }\n      });\n    });\n    req.on('error', e => resolve({ platform, success: false, error: e.message }));\n    req.write(buf); req.end();\n  });\n}\n\nconst [igResult, ttResult] = await Promise.all([\n  postToAccount(igId, 'instagram'),\n  postToAccount(ttId, 'tiktok')\n]);\n\nconsole.log('IG:', igResult.success, igResult.url || igResult.raw);\nconsole.log('TT:', ttResult.success, ttResult.url || ttResult.raw);\n\nreturn [{ json: {\n  platform: 'postforme',\n  success: igResult.success || ttResult.success,\n  instagram: igResult,\n  tiktok: ttResult,\n  url: igResult.url || ttResult.url\n}}];"
       },
       "id": "psych4-n6",
-      "name": "Upload to Instagram",
+      "name": "Post via PostForMe",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "continueOnFail": true,
@@ -170,21 +170,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const https = require('https');\nconst data = $('Download Video for Publishing').first().json;\nconst apiKey = $env.POSTFORME_API_KEY;\nconst accountId = $env.POSTFORME_APERTURE_TIKTOK_ACCOUNT_ID;\nif (!apiKey) throw new Error('POSTFORME_API_KEY not set');\nif (!accountId) throw new Error('POSTFORME_APERTURE_TIKTOK_ACCOUNT_ID not set');\nconst nl = String.fromCharCode(10);\nconst caption = ((data.title || data.topic || '') + nl + nl + (data.hashtags || '')).slice(0, 2190);\nconst videoUrl = data.drive_video_url;\nif (!videoUrl) throw new Error('No drive_video_url in data');\nconst postBody = JSON.stringify({ caption, social_accounts: [accountId], media: [{ url: videoUrl }] });\nconst result = await new Promise((resolve, reject) => {\n  const buf = Buffer.from(postBody);\n  const req = https.request({\n    hostname: 'api.postforme.dev', path: '/v1/social-posts', method: 'POST',\n    headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json', 'Content-Length': buf.length }\n  }, res => { let d=''; res.on('data',c=>d+=c); res.on('end',()=>{ try{resolve(JSON.parse(d));}catch(e){reject(new Error('Non-JSON: '+d.slice(0,200)));} }); });\n  req.on('error', reject); req.write(buf); req.end();\n});\nconsole.log('PostForMe tiktok:', JSON.stringify(result).slice(0,300));\nif (result.error || result.status === 'error') throw new Error('PostForMe tiktok error: ' + (result.message || JSON.stringify(result)));\nconst url = result.postIds?.find(p=>p.platform==='tiktok')?.postUrl || result.url || '';\nreturn [{ json: { platform: 'tiktok', success: true, url } }];"
-      },
-      "id": "psych4-n9",
-      "name": "Upload to TikTok",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "continueOnFail": true,
-      "position": [
-        1220,
-        640
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "const data = $('Pick Next Ready Row').first().json;\nconst results = ['Upload to YouTube','Upload to Instagram','Upload to Facebook Reels','Upload to LinkedIn','Upload to TikTok'].map(n => {\n  try { return $(n).first().json; } catch(e) { return { platform: n, success: false, error: 'node did not run' }; }\n});\n\nconst byPlatform = {};\nresults.forEach(r => { byPlatform[r.platform] = r; });\n\nconst anySuccess = results.some(r => r.success);\nconsole.log('Publish results for ' + data.job_id + ': ' + results.map(r => r.platform + '=' + (r.success ? 'OK' : 'FAIL')).join(', '));\n\nreturn [{ json: {\n  ...data,\n  youtube_url:   (byPlatform.youtube   && byPlatform.youtube.success)   ? byPlatform.youtube.url   : '',\n  instagram_url: (byPlatform.instagram && byPlatform.instagram.success) ? byPlatform.instagram.url : '',\n  facebook_url:  (byPlatform.facebook  && byPlatform.facebook.success)  ? byPlatform.facebook.url  : '',\n  linkedin_url:  (byPlatform.linkedin  && byPlatform.linkedin.success)  ? byPlatform.linkedin.url  : '',\n  tiktok_url:    (byPlatform.tiktok    && byPlatform.tiktok.success)    ? byPlatform.tiktok.url    : '',\n  any_success:   anySuccess,\n  posted_at:     new Date().toISOString()\n}}];"
+        "jsCode": "const data = $('Pick Next Ready Row').first().json;\nconst results = ['Upload to YouTube','Post via PostForMe','Upload to Facebook Reels','Upload to LinkedIn','Upload to TikTok'].map(n => {\n  try { return $(n).first().json; } catch(e) { return { platform: n, success: false, error: 'node did not run' }; }\n});\n\nconst byPlatform = {};\nresults.forEach(r => { byPlatform[r.platform] = r; });\n\nconst anySuccess = results.some(r => r.success);\nconsole.log('Publish results for ' + data.job_id + ': ' + results.map(r => r.platform + '=' + (r.success ? 'OK' : 'FAIL')).join(', '));\n\nreturn [{ json: {\n  ...data,\n  youtube_url:   (byPlatform.youtube   && byPlatform.youtube.success)   ? byPlatform.youtube.url   : '',\n  instagram_url: (byPlatform.instagram && byPlatform.instagram.success) ? byPlatform.instagram.url : '',\n  facebook_url:  (byPlatform.facebook  && byPlatform.facebook.success)  ? byPlatform.facebook.url  : '',\n  linkedin_url:  (byPlatform.linkedin  && byPlatform.linkedin.success)  ? byPlatform.linkedin.url  : '',\n  tiktok_url:    (byPlatform.tiktok    && byPlatform.tiktok.success)    ? byPlatform.tiktok.url    : '',\n  any_success:   anySuccess,\n  posted_at:     new Date().toISOString()\n}}];"
       },
       "id": "psych4-n10",
       "name": "Collect Results",
@@ -353,18 +339,7 @@
       "main": [
         [
           {
-            "node": "Upload to Instagram",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Upload to Instagram": {
-      "main": [
-        [
-          {
-            "node": "Upload to Facebook Reels",
+            "node": "Post via PostForMe",
             "type": "main",
             "index": 0
           }
@@ -384,24 +359,7 @@
     },
     "Upload to LinkedIn": {
       "main": [
-        [
-          {
-            "node": "Upload to TikTok",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Upload to TikTok": {
-      "main": [
-        [
-          {
-            "node": "Collect Results",
-            "type": "main",
-            "index": 0
-          }
-        ]
+        []
       ]
     },
     "Collect Results": {
@@ -453,6 +411,17 @@
         [
           {
             "node": "Read Video Queue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post via PostForMe": {
+      "main": [
+        [
+          {
+            "node": "Upload to Facebook Reels",
             "type": "main",
             "index": 0
           }
