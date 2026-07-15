@@ -261,7 +261,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const base = $('Assemble Video').first().json;\nlet driveJson = {};\ntry { driveJson = $('Upload to Google Drive').first().json; } catch(e) {}\nconst fileId = driveJson.id || null;\nconst driveUrl = fileId ? ('https://drive.usercontent.google.com/download?id=' + fileId + '&export=download') : null;\nconsole.log('Drive: ' + (fileId ? 'OK -> ' + fileId : 'upload did not return an id'));\nreturn [{ json: { ...base, drive_file_id: fileId, drive_video_url: driveUrl } }];\n"
+        "jsCode": "const videoUpload = $('Upload to Google Drive').first().json;\nconst assembleData = $('Assemble Video').first().json;\n\n// Thumb URL (optional)\nlet thumbUrl = null;\ntry {\n  const thumbUpload = $('Upload Thumbnail to Drive').first().json;\n  if (thumbUpload && thumbUpload.id) {\n    thumbUrl = 'https://drive.google.com/uc?export=download&id=' + thumbUpload.id;\n  }\n} catch(e) { console.log('No thumb upload data:', e.message); }\n\nconst fileId = videoUpload.id;\nconst videoUrl = 'https://drive.google.com/uc?export=download&id=' + fileId;\nconst renderTimeSec = Math.round((Date.now() - assembleData.start_time) / 1000);\n\nreturn [{ json: {\n  job_id:              assembleData.job_id,\n  topic:               assembleData.topic,\n  title:               assembleData.title,\n  quote:               assembleData.quote || '',\n  caption:             assembleData.caption || '',\n  hashtags:            assembleData.hashtags || '',\n  philosopher:         assembleData.philosopher || '',\n  video_url:           videoUrl,\n  drive_file_id:       fileId,\n  drive_video_url:     videoUrl,\n  thumb_url:           thumbUrl,\n  render_time_seconds: renderTimeSec,\n  sheet_row:           assembleData.sheet_row,\n  status:              'stage2_complete'\n} }];"
       },
       "id": "psych2-n9d",
       "name": "Merge Drive Info",
@@ -322,7 +322,7 @@
         "nodeCredentialType": "googleSheetsOAuth2Api",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ majorDimension: 'ROWS', values: [[ $json.job_id, $json.philosopher, 'Ready to Post', $json.drive_video_url || '', $json.title, $json.hashtags || '', $json.caption || '', '', '', '', '', '' ]] }) }}",
+        "jsonBody": "={{ JSON.stringify({ majorDimension: 'ROWS', values: [[ $json.job_id, $json.philosopher, 'Ready to Post', $json.drive_video_url || '', $json.title, $json.hashtags || '', $json.caption || '', $json.thumb_url || '', '', '', '', '' ]] }) }}",
         "options": {
           "timeout": 10000
         }
@@ -340,6 +340,93 @@
         "googleSheetsOAuth2Api": {
           "id": "Jjgt2YNg8jNRBVXS",
           "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "id": "psych2-thumb1",
+      "name": "Read Thumbnail File",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2740,
+        120
+      ],
+      "continueOnFail": true,
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst data = $('Assemble Video').first().json;\nconst thumbPath = data.thumb_path;\nif (!thumbPath || !fs.existsSync(thumbPath)) {\n  console.log('No thumb file at', thumbPath, '- skipping');\n  return [{ json: { ...data, thumb_skipped: true } }];\n}\nconst stat = fs.statSync(thumbPath);\nconst buf = fs.readFileSync(thumbPath);\nconst b64 = buf.toString('base64');\nreturn [{\n  json: { ...data, thumb_skipped: false },\n  binary: { data: { data: b64, mimeType: 'image/jpeg', fileName: data.thumb_filename, fileExtension: 'jpg' } }\n}];"
+      }
+    },
+    {
+      "id": "psych2-thumb2",
+      "name": "Upload Thumbnail to Drive",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        2820,
+        120
+      ],
+      "continueOnFail": true,
+      "parameters": {
+        "name": "={{ $('Assemble Video').first().json.thumb_filename }}",
+        "driveId": {
+          "__rl": true,
+          "value": "MyDrive",
+          "mode": "list",
+          "cachedResultName": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "={{ $env.GOOGLE_DRIVE_FOLDER_ID_VIDEOS }}",
+          "mode": "id"
+        },
+        "options": {
+          "simplifyOutput": false
+        }
+      },
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "lTPBYO6mXOO43KmE",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "id": "psych2-thumb3",
+      "name": "Make Thumb Public",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        2900,
+        120
+      ],
+      "continueOnFail": true,
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://www.googleapis.com/drive/v3/files/' + $json.id + '/permissions' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleDriveOAuth2Api",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "type",
+              "value": "anyone"
+            },
+            {
+              "name": "role",
+              "value": "reader"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "lTPBYO6mXOO43KmE",
+          "name": "Google Drive account"
         }
       }
     }
@@ -510,7 +597,7 @@
       "main": [
         [
           {
-            "node": "Merge Drive Info",
+            "node": "Read Thumbnail File",
             "type": "main",
             "index": 0
           }
@@ -538,6 +625,39 @@
           },
           {
             "node": "Add to Video Queue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Thumbnail File": {
+      "main": [
+        [
+          {
+            "node": "Upload Thumbnail to Drive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload Thumbnail to Drive": {
+      "main": [
+        [
+          {
+            "node": "Make Thumb Public",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Make Thumb Public": {
+      "main": [
+        [
+          {
+            "node": "Merge Drive Info",
             "type": "main",
             "index": 0
           }
