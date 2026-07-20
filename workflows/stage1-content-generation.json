@@ -203,29 +203,16 @@
       ]
     },
     {
-      "parameters": {
-        "method": "POST",
-        "url": "https://sheets.googleapis.com/v4/spreadsheets/1VD-F6Wj47Dm_5Uo_zdIEuxOnqprepCPRTKEmTYs6mFs/values/Video%20Production%20Queue!A:L:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "googleDriveOAuth2Api",
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ values: [[ $json.job_id, $json.topic, $json.title, 'READY_FOR_VIDEO', $json.payload_json, '', '', $json.hashtags, $json.sheet_row, $json.readyForVideoAt, '', '' ]] }) }}",
-        "options": {}
-      },
       "id": "node12",
       "name": "Append to Video Queue",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.1,
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
       "position": [
         2640,
         0
       ],
-      "credentials": {
-        "googleDriveOAuth2Api": {
-          "id": "lTPBYO6mXOO43KmE",
-          "name": "Google Drive account (new)"
-        }
+      "parameters": {
+        "jsCode": "const d = $input.first().json;\nconst sheetId = '1VD-F6Wj47Dm_5Uo_zdIEuxOnqprepCPRTKEmTYs6mFs';\nconst sheetName = 'Video%20Production%20Queue';\n\n// Find next empty row by reading full A:L range (avoids append landing at wrong column)\nconst readResp = await this.helpers.httpRequestWithAuthentication.call(\n  this, 'googleSheetsOAuth2Api',\n  {\n    method: 'GET',\n    url: `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${sheetName}!A:L`,\n  }\n);\nconst existingRows = (readResp.values || []);\nconst nextRow = existingRows.length + 1;\n\n// PUT to exact row so data always lands in column A (not F like append was doing)\nawait this.helpers.httpRequestWithAuthentication.call(\n  this, 'googleSheetsOAuth2Api',\n  {\n    method: 'PUT',\n    url: `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${sheetName}!A${nextRow}:L${nextRow}?valueInputOption=RAW`,\n    body: {\n      majorDimension: 'ROWS',\n      values: [[\n        d.job_id, d.topic, d.title, 'READY_FOR_VIDEO',\n        d.payload_json, '', '', d.hashtags,\n        d.sheet_row, d.readyForVideoAt || new Date().toISOString(), '', ''\n      ]]\n    },\n    json: true,\n  }\n);\n\nconsole.log('Appended job', d.job_id, 'to row', nextRow);\nconst updatedRange = `'Video Production Queue'!A${nextRow}:L${nextRow}`;\nreturn [{ json: {\n  spreadsheetId: sheetId,\n  tableRange: updatedRange,\n  updates: {\n    spreadsheetId: sheetId,\n    updatedRange: updatedRange,\n    updatedRows: 1,\n    updatedColumns: 12,\n    updatedCells: 12\n  }\n}}];"
       }
     },
     {
@@ -393,7 +380,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const http = require('http');\n\nconst row   = $('Build Video Queue Row').item.json;\nconst extra = JSON.parse(row.payload_json || '{}');\n\n// Extract queue row index from Append to Video Queue response\nlet queueRowIndex = null;\ntry {\n  const appendRes = $('Append to Video Queue').item.json;\n  const updRange  = (appendRes.updates && appendRes.updates.updatedRange) || '';\n  const m = updRange.match(/A(\\d+):/);\n  if (m) queueRowIndex = parseInt(m[1]);\n} catch(e) { console.log('queue row index not found:', e.message); }\n\nconst payload = {\n  job_id:             row.job_id,\n  topic:              row.topic,\n  title:              row.title,\n  hashtags:           row.hashtags,\n  sheet_row:          row.sheet_row,\n  queue_row_index:    queueRowIndex,\n  narration:          extra.narration || '',\n  clip_prompts:       extra.clip_prompts || [],\n  audio_path:         extra.audio_path || null,\n  subs_path:          extra.subs_path  || null,\n  audio_duration:     extra.audio_duration || 19.1,\n  subtitle_chunks:    extra.subtitle_chunks || [],\n  word_timings:       extra.word_timings || [],\n  bgm_path:           extra.bgm_path || null,\n  negative_prompts:   extra.negative_prompts || [],\n  highlight_keywords: extra.highlight_keywords || [],\n  scenes:             extra.scenes || [],\n  readyForVideoAt:    row.readyForVideoAt,\n  start_time:         Date.now()\n};\n\nconst body = JSON.stringify(payload);\nawait new Promise((res, rej) => {\n  const req = http.request({\n    hostname:'localhost', port:5679,\n    path:'/webhook/stage2-video', method:'POST',\n    headers:{'Content-Type':'application/json','Content-Length':Buffer.byteLength(body)}\n  }, r => { let d=''; r.on('data',c=>d+=c); r.on('end',()=>res(d)); });\n  req.on('error', rej);\n  req.write(body); req.end();\n});\n\nconsole.log('Stage 2 triggered. queue_row_index:', queueRowIndex);\nreturn [{ json: { ...payload, stage2_triggered: true } }];"
+        "jsCode": "const http = require('http');\n\nconst row   = $('Build Video Queue Row').item.json;\nconst extra = JSON.parse(row.payload_json || '{}');\n\n// Extract queue row index from Append to Video Queue response\nlet queueRowIndex = null;\ntry {\n  const appendRes = $('Append to Video Queue').item.json;\n  const updRange  = (appendRes.updates && appendRes.updates.updatedRange) || '';\n  const m = updRange.match(/[A-Z]+(\\d+):/);\n  if (m) queueRowIndex = parseInt(m[1]);\n} catch(e) { console.log('queue row index not found:', e.message); }\n\nconst payload = {\n  job_id:             row.job_id,\n  topic:              row.topic,\n  title:              row.title,\n  hashtags:           row.hashtags,\n  sheet_row:          row.sheet_row,\n  queue_row_index:    queueRowIndex,\n  narration:          extra.narration || '',\n  clip_prompts:       extra.clip_prompts || [],\n  audio_path:         extra.audio_path || null,\n  subs_path:          extra.subs_path  || null,\n  audio_duration:     extra.audio_duration || 19.1,\n  subtitle_chunks:    extra.subtitle_chunks || [],\n  word_timings:       extra.word_timings || [],\n  bgm_path:           extra.bgm_path || null,\n  negative_prompts:   extra.negative_prompts || [],\n  highlight_keywords: extra.highlight_keywords || [],\n  scenes:             extra.scenes || [],\n  readyForVideoAt:    row.readyForVideoAt,\n  start_time:         Date.now()\n};\n\nconst body = JSON.stringify(payload);\nawait new Promise((res, rej) => {\n  const req = http.request({\n    hostname:'localhost', port:5679,\n    path:'/webhook/stage2-video', method:'POST',\n    headers:{'Content-Type':'application/json','Content-Length':Buffer.byteLength(body)}\n  }, r => { let d=''; r.on('data',c=>d+=c); r.on('end',()=>res(d)); });\n  req.on('error', rej);\n  req.write(body); req.end();\n});\n\nconsole.log('Stage 2 triggered. queue_row_index:', queueRowIndex);\nreturn [{ json: { ...payload, stage2_triggered: true } }];"
       },
       "id": "s1q-trigger-next",
       "name": "Trigger Stage2",
